@@ -113,6 +113,6 @@ tasksRouter.delete(
   '/:id',
   validate({ params: idParam }),
   asyncHandler(async (req, res) => {
-    res.json(await service.deleteTask(req.params.id));
+    res.json(await service.deleteTask(req.params.id, req.user));
   }),
 );

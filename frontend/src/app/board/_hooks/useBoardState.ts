@@ -364,6 +364,16 @@ export function useBoardState() {
     fetchTasks();
   };
 
+  const handleDeleteTask = useCallback(async (taskId: string) => {
+    try {
+      await api.tasks.remove(taskId);
+      toast.success('Task deleted');
+      fetchTasksRef.current();
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to delete task');
+    }
+  }, []);
+
   const fetchTasksRef = useRef(fetchTasks);
   useEffect(() => { fetchTasksRef.current = fetchTasks; }, [fetchTasks]);
   const stableFetchTasks = useCallback(() => { fetchTasksRef.current(); }, []);
@@ -572,6 +582,7 @@ export function useBoardState() {
     tasksByStatus,
     tableTasks,
     handleRefresh,
+    handleDeleteTask,
     stableFetchTasks,
     stableHandleDropTask,
     toggleAssignee,

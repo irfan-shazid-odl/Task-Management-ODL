@@ -1,6 +1,6 @@
 import React from 'react';
 import Link from 'next/link';
-import { ChevronRight, ChevronLeft, Clock, CalendarDays, Loader2, Send, ExternalLink, Pencil, FileText, ChevronDown, Wallet } from 'lucide-react';
+import { ChevronRight, ChevronLeft, Clock, CalendarDays, Loader2, Send, ExternalLink, Pencil, FileText, ChevronDown, Wallet, Trash2 } from 'lucide-react';
 import { Task, TASK_STATUSES } from '@/lib/types';
 import { PriorityBadge } from '../StatusBadge';
 import Avatar from '../Avatar';
@@ -17,6 +17,7 @@ interface TaskCardDetailsProps {
   logDateOnEditStartRef: React.MutableRefObject<string>; commitLogDateOnly: (date: string) => Promise<void>;
   isLongDesc: boolean; DESC_LIMIT: number; displayStatus: string; getTaskAge: (date: string) => string;
   deadlineDate: Date | null; isOverdue: boolean | null; showMoveButtons: boolean;
+  canDelete?: boolean; onRequestDelete?: () => void;
 }
 
 export default function TaskCardDetails({
@@ -24,7 +25,7 @@ export default function TaskCardDetails({
   logDateEditable, setLogDateEditable, logDate, setLogDate, logging, logHours, hours, setHours, billingHours,
   setBillingHours, canMoveBackward, canMoveForward, moving, moveTask, currentIndex, openEdit, taskStoredLogDate,
   logDateOnEditStartRef, commitLogDateOnly, isLongDesc, DESC_LIMIT, displayStatus, getTaskAge, deadlineDate,
-  isOverdue, showMoveButtons
+  isOverdue, showMoveButtons, canDelete, onRequestDelete
 }: TaskCardDetailsProps) {
   return (
     <>
@@ -66,6 +67,16 @@ export default function TaskCardDetails({
             >
               <Pencil className="w-3 h-3" />
             </button>
+            {/* Delete button (own tasks only) */}
+            {canDelete && (
+              <button
+                onClick={(e) => { e.stopPropagation(); onRequestDelete?.(); }}
+                className="p-1 rounded-md text-slate-400 hover:text-red-500 hover:bg-red-50 transition-all"
+                title="Delete task"
+              >
+                <Trash2 className="w-3 h-3" />
+              </button>
+            )}
           </div>
         </div>
 

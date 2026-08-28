@@ -120,6 +120,7 @@ export default function BoardPage() {
                 onStatusChange={board.stableFetchTasks}
                 onHoursLogged={board.stableFetchTasks}
                 onDropTask={board.stableHandleDropTask}
+                onDeleteTask={board.handleDeleteTask}
                 boardDate={board.boardDate}
               />
             ))}

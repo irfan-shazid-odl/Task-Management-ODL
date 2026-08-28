@@ -10,6 +10,7 @@ interface KanbanColumnProps {
   onStatusChange?: () => void;
   onHoursLogged?: () => void;
   onDropTask?: (taskId: string, targetStatus: TaskStatus) => void;
+  onDeleteTask?: (taskId: string) => void;
   availableProjects?: { id: string; name: string }[];
   boardDate?: string;
 }
@@ -28,7 +29,7 @@ const columnBg: Record<TaskStatus, string> = {
   'Complete': 'border-emerald-100 bg-emerald-50/30',
 };
 
-const KanbanColumnComponent = ({ status, tasks, onStatusChange, onHoursLogged, onDropTask, availableProjects, boardDate }: KanbanColumnProps) => {
+const KanbanColumnComponent = ({ status, tasks, onStatusChange, onHoursLogged, onDropTask, onDeleteTask, availableProjects, boardDate }: KanbanColumnProps) => {
   const [isOver, setIsOver] = React.useState(false);
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -84,6 +85,7 @@ const KanbanColumnComponent = ({ status, tasks, onStatusChange, onHoursLogged, o
               onStatusChange={onStatusChange}
               onHoursLogged={onHoursLogged}
               onDropTask={onDropTask}
+              onDeleteTask={onDeleteTask}
               availableProjects={availableProjects}
               boardDate={boardDate}
             />
@@ -98,6 +100,10 @@ export default memo(KanbanColumnComponent, (prevProps, nextProps) => {
   return (
     prevProps.status === nextProps.status &&
     prevProps.tasks === nextProps.tasks &&
+    prevProps.onStatusChange === nextProps.onStatusChange &&
+    prevProps.onHoursLogged === nextProps.onHoursLogged &&
+    prevProps.onDropTask === nextProps.onDropTask &&
+    prevProps.onDeleteTask === nextProps.onDeleteTask &&
     prevProps.availableProjects === nextProps.availableProjects &&
     prevProps.boardDate === nextProps.boardDate
   );

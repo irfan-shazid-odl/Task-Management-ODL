@@ -168,17 +168,29 @@ export async function updateTask(id: string, patch: Partial<TaskData>) {
   return serialize(task);
 }
 
-export async function deleteTask(id: string) {
+export async function deleteTask(
+  id: string,
+  currentUser?: { sub: string; role?: string },
+) {
   const task = await prisma.task.findUnique({
     where: { id },
     select: {
       status: true,
-      assignments: { select: { status: true } },
+      assignments: { select: { member_id: true, status: true } },
       time_logs: { select: { hours_logged: true, billing_hours: true } },
     },
   });
   if (!task) {
     throw ApiError.notFound('Task not found');
+  }
+
+  // Members may only delete tasks on their own board (tasks they are assigned
+  // to). Leads, Admins and super-admin can delete any task.
+  if (currentUser?.role === 'Member') {
+    const isOwn = task.assignments.some((a) => a.member_id === currentUser.sub);
+    if (!isOwn) {
+      throw ApiError.forbidden('Members can only delete their own tasks.');
+    }
   }
 
   const isCompleted =

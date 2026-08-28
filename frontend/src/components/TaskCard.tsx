@@ -3,6 +3,7 @@
 import React, { useState, memo, useRef, useEffect } from 'react';
 import TaskCardDetails from './_taskCardComponents/TaskCardDetails';
 import TaskEditModal from './_taskCardComponents/TaskEditModal';
+import DeleteConfirmModal from './DeleteConfirmModal';
 import { Task, TaskStatus, TaskPriority, TASK_STATUSES } from '@/lib/types';
 import { api } from '@/lib/api';
 import { useUser } from './UserContext';
@@ -15,6 +16,7 @@ interface TaskCardProps {
   onStatusChange?: () => void;
   onHoursLogged?: () => void;
   onDropTask?: (taskId: string, targetStatus: TaskStatus) => void;
+  onDeleteTask?: (taskId: string) => void;
   showMoveButtons?: boolean;
   availableProjects?: { id: string; name: string }[];
   boardDate?: string;
@@ -22,7 +24,7 @@ interface TaskCardProps {
 
 const todayIsoDate = () => new Date().toLocaleDateString('en-CA');
 
-const TaskCardComponent = ({ task, onStatusChange, onHoursLogged, onDropTask, showMoveButtons = true, availableProjects, boardDate }: TaskCardProps) => {
+const TaskCardComponent = ({ task, onStatusChange, onHoursLogged, onDropTask, onDeleteTask, showMoveButtons = true, availableProjects, boardDate }: TaskCardProps) => {
   const { currentUser, teamMembers } = useUser();
   const [hours, setHours] = useState('');
   const [billingHours, setBillingHours] = useState('');
@@ -54,6 +56,14 @@ const TaskCardComponent = ({ task, onStatusChange, onHoursLogged, onDropTask, sh
   const initialEditLogDateRef = useRef<string>(todayIsoDate());
   const latestLogIdRef = useRef<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // Delete confirmation (own tasks only — enforced again on the backend)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeletingTask, setIsDeletingTask] = useState(false);
+  const isOwnTask = React.useMemo(
+    () => (task as any).assignees?.some((a: any) => a.id === currentUser?.id),
+    [task, currentUser?.id],
+  );
 
   // Project & Document Edit state
   const [editProjectId, setEditProjectId] = useState(task.project_id || '');
@@ -436,7 +446,7 @@ const TaskCardComponent = ({ task, onStatusChange, onHoursLogged, onDropTask, sh
 
   return (
     <>
-      <TaskCardDetails task={task} currentUser={currentUser} descExpanded={descExpanded} setDescExpanded={setDescExpanded} avatarModal={avatarModal} setAvatarModal={setAvatarModal} displayedLogDate={displayedLogDate} logDateEditable={logDateEditable} setLogDateEditable={setLogDateEditable} logDate={logDate} setLogDate={setLogDate} logging={logging} logHours={logHours} hours={hours} setHours={setHours} billingHours={billingHours} setBillingHours={setBillingHours} canMoveBackward={canMoveBackward} canMoveForward={canMoveForward} moving={moving} moveTask={moveTask} currentIndex={currentIndex} openEdit={openEdit} taskStoredLogDate={taskStoredLogDate} logDateOnEditStartRef={logDateOnEditStartRef} commitLogDateOnly={commitLogDateOnly} isLongDesc={isLongDesc} DESC_LIMIT={DESC_LIMIT} displayStatus={displayStatus} getTaskAge={getTaskAge} deadlineDate={deadlineDate} isOverdue={isOverdue} showMoveButtons={showMoveButtons} />
+      <TaskCardDetails task={task} currentUser={currentUser} descExpanded={descExpanded} setDescExpanded={setDescExpanded} avatarModal={avatarModal} setAvatarModal={setAvatarModal} displayedLogDate={displayedLogDate} logDateEditable={logDateEditable} setLogDateEditable={setLogDateEditable} logDate={logDate} setLogDate={setLogDate} logging={logging} logHours={logHours} hours={hours} setHours={setHours} billingHours={billingHours} setBillingHours={setBillingHours} canMoveBackward={canMoveBackward} canMoveForward={canMoveForward} moving={moving} moveTask={moveTask} currentIndex={currentIndex} openEdit={openEdit} taskStoredLogDate={taskStoredLogDate} logDateOnEditStartRef={logDateOnEditStartRef} commitLogDateOnly={commitLogDateOnly} isLongDesc={isLongDesc} DESC_LIMIT={DESC_LIMIT} displayStatus={displayStatus} getTaskAge={getTaskAge} deadlineDate={deadlineDate} isOverdue={isOverdue} showMoveButtons={showMoveButtons} canDelete={!!isOwnTask} onRequestDelete={() => setShowDeleteConfirm(true)} />
       <TaskEditModal showEditModal={showEditModal} setShowEditModal={setShowEditModal} editDescription={editDescription} setEditDescription={setEditDescription} editStatus={editStatus} setEditStatus={setEditStatus} editPriority={editPriority} setEditPriority={setEditPriority} editDeadline={editDeadline} setEditDeadline={setEditDeadline} editProjectId={editProjectId} setEditProjectId={setEditProjectId} editRefDocId={editRefDocId} setEditRefDocId={setEditRefDocId} editHours={editHours} setEditHours={setEditHours} editBillingHours={editBillingHours} setEditBillingHours={setEditBillingHours} editLogDate={editLogDate} setEditLogDate={setEditLogDate} editAssigneeIds={editAssigneeIds} setEditAssigneeIds={setEditAssigneeIds} assigneeSearch={assigneeSearch} setAssigneeSearch={setAssigneeSearch} projDropdownOpen={projDropdownOpen} setProjDropdownOpen={setProjDropdownOpen} docDropdownOpen={docDropdownOpen} setDocDropdownOpen={setDocDropdownOpen} projSearch={projSearch} setProjSearch={setProjSearch} docSearch={docSearch} setDocSearch={setDocSearch} projRect={projRect} setProjRect={setProjRect} docRect={docRect} setDocRect={setDocRect} projTriggerRef={projTriggerRef} docTriggerRef={docTriggerRef} projDropdownRef={projDropdownRef} docDropdownRef={docDropdownRef} availableProjects={availableProjects} editProjectDocs={editProjectDocs} loadingDocs={loadingDocs} teamMembers={teamMembers} canManageAssignees={canManageAssignees} saving={saving} saveEdit={saveEdit} />
       {/* ?????? Avatar Modal ????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????? */}
       {avatarModal && (
@@ -487,6 +497,24 @@ const TaskCardComponent = ({ task, onStatusChange, onHoursLogged, onDropTask, sh
           </div>
         </div>
       )}
+
+      <DeleteConfirmModal
+        isOpen={showDeleteConfirm}
+        onClose={() => setShowDeleteConfirm(false)}
+        onConfirm={async () => {
+          setIsDeletingTask(true);
+          try {
+            await onDeleteTask?.(task.id);
+            setShowDeleteConfirm(false);
+          } finally {
+            setIsDeletingTask(false);
+          }
+        }}
+        isDeleting={isDeletingTask}
+        title="Delete Task"
+        message="This will permanently delete this task along with its assignments and logged hours. This cannot be undone."
+        confirmText="Delete Task"
+      />
     </>
   );
 };
@@ -494,6 +522,7 @@ const TaskCardComponent = ({ task, onStatusChange, onHoursLogged, onDropTask, sh
 export default memo(TaskCardComponent, (prevProps, nextProps) => {
   return (
     prevProps.task === nextProps.task &&
+    prevProps.onDeleteTask === nextProps.onDeleteTask &&
     prevProps.boardDate === nextProps.boardDate &&
     prevProps.showMoveButtons === nextProps.showMoveButtons &&
     prevProps.availableProjects === nextProps.availableProjects
