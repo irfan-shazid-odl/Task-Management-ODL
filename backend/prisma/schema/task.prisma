@@ -1,0 +1,39 @@
+model Task {
+  id               String   @id @default(uuid()) @db.Uuid
+  project_id       String?  @db.Uuid
+  description      String
+  status           String   @default("Todo") // 'Todo' | 'Working' | 'On Review' | 'Complete'
+  priority         String   @default("Low") // 'Low' | 'High' | 'Urgent'
+  deadline         DateTime? @db.Date
+  reference_doc_id String?  @db.Uuid
+  category         String?  // 'Automation' | 'Website' | 'Research' | 'Documentation' | 'Workflow' | 'AI Agent' | 'Other'
+  estimated_time   Decimal? @db.Decimal(10, 2) // manually entered hours, same shape as time_logs.hours_logged/billing_hours
+  log_date         DateTime @default(now()) @db.Date
+  created_at       DateTime @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+
+  project       Project?         @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  reference_doc ProjectDocument? @relation("TaskReferenceDoc", fields: [reference_doc_id], references: [id], onDelete: SetNull)
+  assignments   TaskAssignment[]
+  time_logs     TimeLog[]
+
+  @@index([project_id])
+  @@index([status])
+  @@index([log_date])
+  @@index([project_id, status])
+  @@map("tasks")
+}
+
+model TaskAssignment {
+  task_id   String @db.Uuid
+  member_id String @db.Uuid
+  status    String @default("Todo") // per-assignment status override
+
+  task   Task       @relation(fields: [task_id], references: [id], onDelete: Cascade)
+  member TeamMember @relation(fields: [member_id], references: [id], onDelete: Cascade)
+
+  @@id([task_id, member_id])
+  @@index([member_id])
+  @@index([member_id, status])
+  @@map("task_assignments")
+}

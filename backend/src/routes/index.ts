@@ -1,0 +1,32 @@
+import { Router } from 'express';
+import { authRouter } from '../modules/auth/auth.routes.js';
+import { usersRouter } from '../modules/users/users.routes.js';
+import { projectsRouter } from '../modules/projects/projects.routes.js';
+import { tasksRouter } from '../modules/tasks/tasks.routes.js';
+import { taskAssignmentsRouter } from '../modules/taskAssignments/taskAssignments.routes.js';
+import { timeLogsRouter } from '../modules/timeLogs/timeLogs.routes.js';
+import { clientsRouter } from '../modules/clients/clients.routes.js';
+import { subscriptionsRouter } from '../modules/subscriptions/subscriptions.routes.js';
+import { activityRouter } from '../modules/activity/activity.routes.js';
+import { credentialsRouter } from '../modules/credentials/credentials.routes.js';
+import { documentsRouter } from '../modules/documents/documents.routes.js';
+import { vaultRouter } from '../modules/vault/vault.routes.js';
+import { filesRouter } from '../modules/files/files.routes.js';
+import { statsRouter } from '../modules/stats/stats.routes.js';
+
+export const apiRouter = Router();
+
+apiRouter.use('/stats', statsRouter);
+apiRouter.use('/auth', authRouter);
+apiRouter.use('/users', usersRouter);
+apiRouter.use('/projects', projectsRouter);
+apiRouter.use('/tasks', tasksRouter);
+apiRouter.use('/task-assignments', taskAssignmentsRouter);
+apiRouter.use('/time-logs', timeLogsRouter);
+apiRouter.use('/clients', clientsRouter);
+apiRouter.use('/subscriptions', subscriptionsRouter);
+apiRouter.use('/activity-logs', activityRouter);
+apiRouter.use('/project-credentials', credentialsRouter);
+apiRouter.use('/project-documents', documentsRouter);
+apiRouter.use('/vault', vaultRouter);
+apiRouter.use('/files', filesRouter);

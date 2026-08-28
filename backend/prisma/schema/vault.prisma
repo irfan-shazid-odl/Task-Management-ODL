@@ -1,0 +1,17 @@
+model PasswordVaultItem {
+  id                 String   @id @default(uuid()) @db.Uuid
+  member_id          String   @db.Uuid
+  title              String
+  username           String   @default("")
+  encrypted_password String   @default("")
+  url                String?  @default("")
+  notes              String?  @default("")
+  folder             String   @default("")
+  created_at         DateTime @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+
+  member TeamMember @relation(fields: [member_id], references: [id], onDelete: Cascade)
+
+  @@index([member_id])
+  @@map("password_vault")
+}

@@ -1,0 +1,18 @@
+model ProjectKnowledge {
+  id              String   @id @default(uuid()) @db.Uuid
+  project_id      String   @db.Uuid
+  kind            String
+  title           String
+  content_text    String?
+  file_url        String?
+  file_name       String?
+  file_size_bytes Int?
+  occurred_at     DateTime? @db.Date
+  author_id       String?  @db.Uuid
+  created_at      DateTime @default(now()) @db.Timestamptz(6)
+
+  project Project @relation(fields: [project_id], references: [id], onDelete: Cascade)
+
+  @@index([project_id])
+  @@map("project_knowledge")
+}

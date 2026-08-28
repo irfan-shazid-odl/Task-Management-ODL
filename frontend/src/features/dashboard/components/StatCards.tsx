@@ -1,0 +1,66 @@
+'use client';
+
+import React from 'react';
+import { Activity, Clock, Zap, FolderOpen } from 'lucide-react';
+import MetricCard from '@/components/MetricCard';
+import type { StatusCount } from '../lib/aggregations';
+
+interface Props {
+  totalActive: number;
+  totalWorkingHours: number;
+  totalBillingHours: number;
+  totalProjects: number;
+  statusCounts: StatusCount[];
+  startDate: string;
+  endDate: string;
+}
+
+export default function StatCards({
+  totalActive,
+  totalWorkingHours,
+  totalBillingHours,
+  totalProjects,
+  statusCounts,
+  startDate,
+  endDate,
+}: Props) {
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+      <MetricCard
+        title="Active Tasks"
+        value={totalActive}
+        subtitle="Excluding completed"
+        icon={Activity}
+        color="violet"
+      />
+      <MetricCard
+        title="Working Hours"
+        value={totalWorkingHours.toFixed(1)}
+        subtitle={startDate === endDate ? `Logged today` : `Logged in filter range`}
+        icon={Clock}
+        color="cyan"
+      />
+      <MetricCard
+        title="Logged Time"
+        value={totalBillingHours.toFixed(1)}
+        subtitle={startDate === endDate ? `Recorded today` : `Recorded in filter range`}
+        icon={Clock}
+        color="emerald"
+      />
+      <MetricCard
+        title="Projects"
+        value={totalProjects}
+        subtitle="All categories"
+        icon={FolderOpen}
+        color="amber"
+      />
+      <MetricCard
+        title="Ongoing Tasks"
+        value={statusCounts.find((s) => s.status === 'Working')?.count || 0}
+        subtitle="Status: Working"
+        icon={Zap}
+        color="emerald"
+      />
+    </div>
+  );
+}

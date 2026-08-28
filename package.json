@@ -1,0 +1,14 @@
+{
+  "name": "project-tracker",
+  "private": true,
+  "pnpm": {
+    "approvedBuilds": [
+      "@prisma/client",
+      "@prisma/engines",
+      "esbuild",
+      "prisma",
+      "sharp",
+      "unrs-resolver"
+    ]
+  }
+}

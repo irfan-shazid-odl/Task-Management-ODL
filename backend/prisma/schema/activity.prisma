@@ -1,0 +1,16 @@
+model ActivityLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  project_id  String?  @db.Uuid
+  member_id   String?  @db.Uuid
+  action_type String
+  description String
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+
+  project Project?    @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  member  TeamMember? @relation(fields: [member_id], references: [id], onDelete: SetNull)
+
+  @@index([project_id])
+  @@index([member_id])
+  @@index([created_at])
+  @@map("activity_logs")
+}

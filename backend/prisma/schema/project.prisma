@@ -1,0 +1,61 @@
+model Project {
+  id              String   @id @default(uuid()) @db.Uuid
+  name            String
+  category        String // 'Marketplace' | 'BDM' | 'Servicing' | 'Internal' | 'Outside'
+  project_lead_id String?  @db.Uuid
+  brief           String?
+  client_name     String?
+  client_id       String?  @db.Uuid
+  start_date      DateTime? @db.Date
+  status          String?  @default("Active") // 'Active' | 'Paused' | 'Completed'
+  priority        String?  @default("Low") // 'Low' | 'High' | 'Urgent'
+  project_type    String?
+  sort_order      Int?     @default(0)
+  created_at      DateTime @default(now()) @db.Timestamptz(6)
+
+  project_lead        TeamMember?          @relation("ProjectLead", fields: [project_lead_id], references: [id], onDelete: SetNull)
+  client              Client?              @relation(fields: [client_id], references: [id], onDelete: SetNull)
+  credentials         ProjectCredential[]
+  documents           ProjectDocument[]
+  tasks               Task[]
+  activity_logs       ActivityLog[]
+  conversations       ClientConversation[]
+  knowledge           ProjectKnowledge[]
+  project_ai_messages ProjectAiMessage[]
+
+  @@index([project_lead_id])
+  @@index([client_id])
+  @@index([sort_order])
+  @@map("projects")
+}
+
+model ProjectCredential {
+  id         String   @id @default(uuid()) @db.Uuid
+  project_id String?  @db.Uuid
+  label      String
+  username   String
+  password   String
+  url        String?
+  notes      String?
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  project Project? @relation(fields: [project_id], references: [id], onDelete: Cascade)
+
+  @@index([project_id])
+  @@map("project_credentials")
+}
+
+model ProjectDocument {
+  id         String   @id @default(uuid()) @db.Uuid
+  project_id String?  @db.Uuid
+  title      String
+  url        String
+  doc_type   String // 'Brief' | 'Spec' | 'Design' | 'Contract' | 'Link' | 'Other'
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  project        Project? @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  referencing    Task[]   @relation("TaskReferenceDoc")
+
+  @@index([project_id])
+  @@map("project_documents")
+}

@@ -1,0 +1,38 @@
+model ClientConversation {
+  id                String   @id @default(uuid()) @db.Uuid
+  project_id        String   @db.Uuid
+  client_id         String?  @db.Uuid
+  title             String
+  content           String   @default("")
+  conversation_type String   @default("other") // call | email | meeting | chat | other
+  conversation_date DateTime @default(now()) @db.Timestamptz(6)
+  created_by        String?  @db.Uuid
+  created_at        DateTime @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+
+  project     Project                  @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  client      Client?                  @relation(fields: [client_id], references: [id], onDelete: SetNull)
+  creator     TeamMember?              @relation("ConversationCreatedBy", fields: [created_by], references: [id], onDelete: SetNull)
+  attachments ConversationAttachment[]
+
+  @@index([project_id])
+  @@map("client_conversations")
+}
+
+model ConversationAttachment {
+  id              String   @id @default(uuid()) @db.Uuid
+  conversation_id String   @db.Uuid
+  file_name       String
+  storage_path    String
+  public_url      String?
+  mime_type       String?
+  file_size       BigInt?
+  uploaded_by     String?  @db.Uuid
+  created_at      DateTime @default(now()) @db.Timestamptz(6)
+
+  conversation ClientConversation @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
+  uploader     TeamMember?        @relation("AttachmentUploadedBy", fields: [uploaded_by], references: [id], onDelete: SetNull)
+
+  @@index([conversation_id])
+  @@map("conversation_attachments")
+}

@@ -1,0 +1,63 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# build output
+frontend/.next/
+frontend/out/
+backend/dist/
+build/
+out/
+
+# testing / coverage
+coverage/
+
+# env files
+.env
+.env.*
+!.env.example
+
+# supabase backups (generated, not source)
+supabase/backups/
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# debug logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+*.log
+
+# misc
+.DS_Store
+Thumbs.db
+*.pem
+*.key
+
+# vercel
+.vercel
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# AI tooling
+.claude/
+
+# Demo reference folder (not part of the app)
+/Demo
+
+# Reference-only example project (not part of the app)
+/Project-tracker-example

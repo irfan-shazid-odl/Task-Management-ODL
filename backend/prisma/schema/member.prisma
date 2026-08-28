@@ -1,0 +1,33 @@
+model TeamMember {
+  id             String   @id @default(uuid()) @db.Uuid
+  name           String
+  email          String   @unique
+  role           String // 'super-admin' | 'Admin' | 'Lead' | 'Member'
+  password_hash  String? // bcrypt hash; nullable for legacy rows pending reset
+  is_first_login Boolean  @default(true)
+  phone          String?
+  location       String?
+  department     String?
+  bio            String?
+  avatar_url     String?
+  is_paused      Boolean? @default(false)
+  created_at     DateTime @default(now()) @db.Timestamptz(6)
+
+  // Set when this member was invited by a Lead (not Admin/super-admin) — puts
+  // them "under" that Lead, so the Lead's board/reports scope to their team.
+  managed_by_id  String?  @db.Uuid
+
+  led_projects          Project[]              @relation("ProjectLead")
+  task_assignments      TaskAssignment[]
+  time_logs             TimeLog[]
+  activity_logs         ActivityLog[]
+  password_vault        PasswordVaultItem[]
+  conversations_created ClientConversation[]   @relation("ConversationCreatedBy")
+  attachments_uploaded  ConversationAttachment[] @relation("AttachmentUploadedBy")
+  managed_by            TeamMember?  @relation("MemberManager", fields: [managed_by_id], references: [id], onDelete: SetNull)
+  managed_members       TeamMember[] @relation("MemberManager")
+
+  @@index([email])
+  @@index([managed_by_id])
+  @@map("team_members")
+}

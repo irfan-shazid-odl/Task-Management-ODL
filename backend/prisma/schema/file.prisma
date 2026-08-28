@@ -1,0 +1,13 @@
+model FileAsset {
+  id          String   @id @default(uuid()) @db.Uuid
+  owner_id    String?  @db.Uuid // team_member id that uploaded it (soft link)
+  kind        String   @default("avatar") // 'avatar' | 'attachment'
+  file_name   String
+  mime_type   String
+  size_bytes  Int
+  data        Bytes // raw file bytes stored in Postgres (bytea)
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([owner_id])
+  @@map("file_assets")
+}

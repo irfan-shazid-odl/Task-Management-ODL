@@ -1,0 +1,15 @@
+model Client {
+  id           String   @id @default(uuid()) @db.Uuid
+  name         String
+  contact_name String?
+  email        String?
+  phone        String?
+  status       String   @default("Active") // 'Active' | 'Inactive' | 'Lead'
+  contacted_by String?
+  created_at   DateTime @default(now()) @db.Timestamptz(6)
+
+  projects      Project[]
+  conversations ClientConversation[]
+
+  @@map("clients")
+}
