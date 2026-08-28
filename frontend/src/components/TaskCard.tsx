@@ -42,8 +42,6 @@ const TaskCardComponent = ({ task, onStatusChange, onHoursLogged, onDropTask, sh
 
   // Derived display status (per-assignment overrides global)
   const displayStatus = (task as any).assignment_status || task.status;
-
-  // Edit modal state
   const [showEditModal, setShowEditModal] = useState(false);
   const [editDescription, setEditDescription] = useState(task.description);
   const [editStatus, setEditStatus] = useState<TaskStatus>(displayStatus);
@@ -130,10 +128,6 @@ const TaskCardComponent = ({ task, onStatusChange, onHoursLogged, onDropTask, sh
   const canMoveBackward = currentIndex > 0;
 
   async function moveTask(direction: 'forward' | 'backward') {
-    if (isTaskLocked) {
-      toast.error('Completed tasks are locked and cannot be moved by Leads or Members.');
-      return;
-    }
     const newIndex = direction === 'forward' ? currentIndex + 1 : currentIndex - 1;
     if (newIndex < 0 || newIndex >= TASK_STATUSES.length) return;
     const newStatus: TaskStatus = TASK_STATUSES[newIndex];
@@ -440,12 +434,10 @@ const TaskCardComponent = ({ task, onStatusChange, onHoursLogged, onDropTask, sh
     return 'now';
   }
 
-  const isTaskLocked = displayStatus === 'Complete' && !['super-admin', 'Admin'].includes(currentUser?.role || '');
-
   return (
     <>
-      <TaskCardDetails task={task} currentUser={currentUser} isTaskLocked={isTaskLocked} descExpanded={descExpanded} setDescExpanded={setDescExpanded} avatarModal={avatarModal} setAvatarModal={setAvatarModal} displayedLogDate={displayedLogDate} logDateEditable={logDateEditable} setLogDateEditable={setLogDateEditable} logDate={logDate} setLogDate={setLogDate} logging={logging} logHours={logHours} hours={hours} setHours={setHours} billingHours={billingHours} setBillingHours={setBillingHours} canMoveBackward={canMoveBackward} canMoveForward={canMoveForward} moving={moving} moveTask={moveTask} currentIndex={currentIndex} openEdit={openEdit} taskStoredLogDate={taskStoredLogDate} logDateOnEditStartRef={logDateOnEditStartRef} commitLogDateOnly={commitLogDateOnly} isLongDesc={isLongDesc} DESC_LIMIT={DESC_LIMIT} displayStatus={displayStatus} getTaskAge={getTaskAge} deadlineDate={deadlineDate} isOverdue={isOverdue} showMoveButtons={showMoveButtons} />
-      <TaskEditModal showEditModal={showEditModal} setShowEditModal={setShowEditModal} editDescription={editDescription} setEditDescription={setEditDescription} editStatus={editStatus} setEditStatus={setEditStatus} editPriority={editPriority} setEditPriority={setEditPriority} editDeadline={editDeadline} setEditDeadline={setEditDeadline} editProjectId={editProjectId} setEditProjectId={setEditProjectId} editRefDocId={editRefDocId} setEditRefDocId={setEditRefDocId} editHours={editHours} setEditHours={setEditHours} editBillingHours={editBillingHours} setEditBillingHours={setEditBillingHours} editLogDate={editLogDate} setEditLogDate={setEditLogDate} editAssigneeIds={editAssigneeIds} setEditAssigneeIds={setEditAssigneeIds} assigneeSearch={assigneeSearch} setAssigneeSearch={setAssigneeSearch} projDropdownOpen={projDropdownOpen} setProjDropdownOpen={setProjDropdownOpen} docDropdownOpen={docDropdownOpen} setDocDropdownOpen={setDocDropdownOpen} projSearch={projSearch} setProjSearch={setProjSearch} docSearch={docSearch} setDocSearch={setDocSearch} projRect={projRect} setProjRect={setProjRect} docRect={docRect} setDocRect={setDocRect} projTriggerRef={projTriggerRef} docTriggerRef={docTriggerRef} projDropdownRef={projDropdownRef} docDropdownRef={docDropdownRef} availableProjects={availableProjects} editProjectDocs={editProjectDocs} loadingDocs={loadingDocs} teamMembers={teamMembers} isTaskLocked={isTaskLocked} canManageAssignees={canManageAssignees} saving={saving} saveEdit={saveEdit} />
+      <TaskCardDetails task={task} currentUser={currentUser} descExpanded={descExpanded} setDescExpanded={setDescExpanded} avatarModal={avatarModal} setAvatarModal={setAvatarModal} displayedLogDate={displayedLogDate} logDateEditable={logDateEditable} setLogDateEditable={setLogDateEditable} logDate={logDate} setLogDate={setLogDate} logging={logging} logHours={logHours} hours={hours} setHours={setHours} billingHours={billingHours} setBillingHours={setBillingHours} canMoveBackward={canMoveBackward} canMoveForward={canMoveForward} moving={moving} moveTask={moveTask} currentIndex={currentIndex} openEdit={openEdit} taskStoredLogDate={taskStoredLogDate} logDateOnEditStartRef={logDateOnEditStartRef} commitLogDateOnly={commitLogDateOnly} isLongDesc={isLongDesc} DESC_LIMIT={DESC_LIMIT} displayStatus={displayStatus} getTaskAge={getTaskAge} deadlineDate={deadlineDate} isOverdue={isOverdue} showMoveButtons={showMoveButtons} />
+      <TaskEditModal showEditModal={showEditModal} setShowEditModal={setShowEditModal} editDescription={editDescription} setEditDescription={setEditDescription} editStatus={editStatus} setEditStatus={setEditStatus} editPriority={editPriority} setEditPriority={setEditPriority} editDeadline={editDeadline} setEditDeadline={setEditDeadline} editProjectId={editProjectId} setEditProjectId={setEditProjectId} editRefDocId={editRefDocId} setEditRefDocId={setEditRefDocId} editHours={editHours} setEditHours={setEditHours} editBillingHours={editBillingHours} setEditBillingHours={setEditBillingHours} editLogDate={editLogDate} setEditLogDate={setEditLogDate} editAssigneeIds={editAssigneeIds} setEditAssigneeIds={setEditAssigneeIds} assigneeSearch={assigneeSearch} setAssigneeSearch={setAssigneeSearch} projDropdownOpen={projDropdownOpen} setProjDropdownOpen={setProjDropdownOpen} docDropdownOpen={docDropdownOpen} setDocDropdownOpen={setDocDropdownOpen} projSearch={projSearch} setProjSearch={setProjSearch} docSearch={docSearch} setDocSearch={setDocSearch} projRect={projRect} setProjRect={setProjRect} docRect={docRect} setDocRect={setDocRect} projTriggerRef={projTriggerRef} docTriggerRef={docTriggerRef} projDropdownRef={projDropdownRef} docDropdownRef={docDropdownRef} availableProjects={availableProjects} editProjectDocs={editProjectDocs} loadingDocs={loadingDocs} teamMembers={teamMembers} canManageAssignees={canManageAssignees} saving={saving} saveEdit={saveEdit} />
       {/* ?????? Avatar Modal ????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????? */}
       {avatarModal && (
         <div

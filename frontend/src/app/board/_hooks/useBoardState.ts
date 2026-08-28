@@ -369,13 +369,6 @@ export function useBoardState() {
   const stableFetchTasks = useCallback(() => { fetchTasksRef.current(); }, []);
 
   const handleDropTask = useCallback(async (taskId: string, newStatus: TaskStatus) => {
-    const task = tasks.find(t => t.id === taskId);
-    const isAdmin = ['super-admin', 'Admin'].includes(currentUser?.role || '');
-    if (task && getDisplayStatus(task) === 'Complete' && !isAdmin) {
-      toast.error('Completed tasks are locked and cannot be moved by staff.');
-      return;
-    }
-
     const shouldUpdateLogDate = newStatus === 'Complete';
 
     if (viewMode === 'all') {

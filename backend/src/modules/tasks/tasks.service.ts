@@ -1,6 +1,7 @@
 import { prisma } from '../../config/prisma.js';
 import type { Prisma } from '@prisma/client';
 import { serialize } from '../../utils/serialize.js';
+import { ApiError } from '../../utils/ApiError.js';
 
 const CARRY_STATUSES = ['Todo', 'Working', 'On Review'];
 
@@ -168,6 +169,30 @@ export async function updateTask(id: string, patch: Partial<TaskData>) {
 }
 
 export async function deleteTask(id: string) {
+  const task = await prisma.task.findUnique({
+    where: { id },
+    select: {
+      status: true,
+      assignments: { select: { status: true } },
+      time_logs: { select: { hours_logged: true, billing_hours: true } },
+    },
+  });
+  if (!task) {
+    throw ApiError.notFound('Task not found');
+  }
+
+  const isCompleted =
+    task.status === 'Complete' ||
+    task.assignments.some((a) => a.status === 'Complete');
+  const hasLoggedTime = task.time_logs.some(
+    (t) => Number(t.hours_logged) > 0 || Number(t.billing_hours) > 0
+  );
+  if (isCompleted && hasLoggedTime) {
+    throw ApiError.forbidden(
+      'This task is Completed with logged time and can no longer be deleted.'
+    );
+  }
+
   await prisma.task.delete({ where: { id } });
   return { ok: true };
 }

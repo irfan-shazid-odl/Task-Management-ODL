@@ -1,5 +1,5 @@
 import React from 'react';
-import { Pencil, X, FolderOpen, ChevronDown, Search, CheckCircle2, FileText, Lock, Clock, Wallet, CalendarDays, Users, Loader2 } from 'lucide-react';
+import { Pencil, X, FolderOpen, ChevronDown, Search, CheckCircle2, FileText, Clock, Wallet, CalendarDays, Users, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { TaskStatus, TaskPriority, TASK_STATUSES, getRoleDisplayName } from '@/lib/types';
 
@@ -20,7 +20,7 @@ interface TaskEditModalProps {
   projTriggerRef: React.RefObject<HTMLButtonElement | null>; docTriggerRef: React.RefObject<HTMLButtonElement | null>;
   projDropdownRef: React.RefObject<HTMLDivElement | null>; docDropdownRef: React.RefObject<HTMLDivElement | null>;
   availableProjects?: { id: string; name: string }[]; editProjectDocs: { id: string; title: string; url: string; doc_type: string }[];
-  loadingDocs: boolean; teamMembers: any[]; isTaskLocked: boolean; canManageAssignees: boolean; saving: boolean; saveEdit: () => void;
+  loadingDocs: boolean; teamMembers: any[]; canManageAssignees: boolean; saving: boolean; saveEdit: () => void;
 }
 
 export default function TaskEditModal({
@@ -29,7 +29,7 @@ export default function TaskEditModal({
   editBillingHours, setEditBillingHours, editLogDate, setEditLogDate, editAssigneeIds, setEditAssigneeIds, assigneeSearch,
   setAssigneeSearch, projDropdownOpen, setProjDropdownOpen, docDropdownOpen, setDocDropdownOpen, projSearch, setProjSearch,
   docSearch, setDocSearch, projRect, setProjRect, docRect, setDocRect, projTriggerRef, docTriggerRef, projDropdownRef,
-  docDropdownRef, availableProjects, editProjectDocs, loadingDocs, teamMembers, isTaskLocked, canManageAssignees, saving, saveEdit
+  docDropdownRef, availableProjects, editProjectDocs, loadingDocs, teamMembers, canManageAssignees, saving, saveEdit
 }: TaskEditModalProps) {
   return (
     <AnimatePresence>
@@ -226,15 +226,12 @@ export default function TaskEditModal({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wider mb-1.5 flex items-center gap-2">
-                    Status {isTaskLocked && <Lock className="w-2.5 h-2.5 text-slate-400 dark:text-slate-500" />}
+                    Status
                   </label>
                   <select
                     value={editStatus}
-                    disabled={isTaskLocked}
                     onChange={e => setEditStatus(e.target.value as TaskStatus)}
-                    className={`w-full bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl px-3 py-2.5 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-violet-400 transition-all ${
-                      isTaskLocked ? 'opacity-50 cursor-not-allowed' : ''
-                    }`}
+                    className="w-full bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl px-3 py-2.5 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-violet-400 transition-all"
                   >
                     {TASK_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
                   </select>

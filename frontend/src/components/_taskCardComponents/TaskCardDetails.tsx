@@ -1,6 +1,6 @@
 import React from 'react';
 import Link from 'next/link';
-import { ChevronRight, ChevronLeft, Clock, CalendarDays, Loader2, Send, ExternalLink, Pencil, FileText, ChevronDown, Lock, Wallet } from 'lucide-react';
+import { ChevronRight, ChevronLeft, Clock, CalendarDays, Loader2, Send, ExternalLink, Pencil, FileText, ChevronDown, Wallet } from 'lucide-react';
 import { Task, TASK_STATUSES } from '@/lib/types';
 import { PriorityBadge } from '../StatusBadge';
 import Avatar from '../Avatar';
@@ -8,7 +8,7 @@ import Avatar from '../Avatar';
 const todayIsoDate = () => new Date().toLocaleDateString('en-CA');
 
 interface TaskCardDetailsProps {
-  task: Task; currentUser: any; isTaskLocked: boolean; descExpanded: boolean; setDescExpanded: React.Dispatch<React.SetStateAction<boolean>>;
+  task: Task; currentUser: any; descExpanded: boolean; setDescExpanded: React.Dispatch<React.SetStateAction<boolean>>;
   avatarModal: any; setAvatarModal: React.Dispatch<React.SetStateAction<any>>; displayedLogDate: string; logDateEditable: boolean;
   setLogDateEditable: React.Dispatch<React.SetStateAction<boolean>>; logDate: string; setLogDate: (date: string) => void;
   logging: boolean; logHours: () => void; hours: string; setHours: (hours: string) => void; billingHours: string;
@@ -20,7 +20,7 @@ interface TaskCardDetailsProps {
 }
 
 export default function TaskCardDetails({
-  task, currentUser: _currentUser, isTaskLocked, descExpanded, setDescExpanded, avatarModal: _avatarModal, setAvatarModal, displayedLogDate,
+  task, currentUser: _currentUser, descExpanded, setDescExpanded, avatarModal: _avatarModal, setAvatarModal, displayedLogDate,
   logDateEditable, setLogDateEditable, logDate, setLogDate, logging, logHours, hours, setHours, billingHours,
   setBillingHours, canMoveBackward, canMoveForward, moving, moveTask, currentIndex, openEdit, taskStoredLogDate,
   logDateOnEditStartRef, commitLogDateOnly, isLongDesc, DESC_LIMIT, displayStatus, getTaskAge, deadlineDate,
@@ -32,19 +32,11 @@ export default function TaskCardDetails({
           className={`group relative bg-white border border-slate-200 rounded-xl p-4
           hover:border-violet-200 hover:bg-slate-50/50 transition-all duration-300
           shadow-sm hover:shadow-md hover:shadow-violet-500/5 cursor-pointer
-          ${isTaskLocked ? '' : 'active:cursor-grabbing'}`}
-          draggable={!isTaskLocked}
+          active:cursor-grabbing`}
+          draggable
           onDragStart={(e: any) => { e.dataTransfer.setData('taskId', task.id); }}
           onClick={() => openEdit()}
         >
-          {/* Locked Indicator for Members & Leads */}
-          {isTaskLocked && (
-            <div className="absolute top-2 left-1/2 -translate-x-1/2 -mt-1 z-10">
-              <span className="flex items-center gap-1 bg-slate-100 text-[8px] font-bold text-slate-400 px-2 py-0.5 rounded-full border border-slate-200 shadow-sm animate-in fade-in zoom-in duration-300">
-                <Lock className="w-2 h-2" /> LOCKED
-              </span>
-            </div>
-          )}
         {/* Priority & Project + Edit button */}
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
@@ -271,7 +263,7 @@ export default function TaskCardDetails({
           <div className="flex items-center justify-between pt-2 border-t border-slate-100">
             <button
               onClick={(e) => { e.stopPropagation(); moveTask('backward'); }}
-              disabled={!canMoveBackward || moving || isTaskLocked}
+              disabled={!canMoveBackward || moving}
               className="flex items-center gap-1 text-[10px] text-slate-400 hover:text-slate-700
                 disabled:opacity-20 disabled:cursor-not-allowed transition-colors px-2 py-1 rounded-md hover:bg-slate-100"
             >
@@ -280,7 +272,7 @@ export default function TaskCardDetails({
             </button>
             <button
               onClick={(e) => { e.stopPropagation(); moveTask('forward'); }}
-              disabled={!canMoveForward || moving || isTaskLocked}
+              disabled={!canMoveForward || moving}
               className="flex items-center gap-1 text-[10px] text-slate-400 hover:text-slate-700
                 disabled:opacity-20 disabled:cursor-not-allowed transition-colors px-2 py-1 rounded-md hover:bg-slate-100"
             >
