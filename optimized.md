@@ -175,7 +175,69 @@ The `html-to-image` dynamic split and the already-lazy `jsPDF` (CDN on demand) l
 
 ---
 
-## 6. Already-shipped work in this codebase (prior commits, not this pass)
+## 6. Fourth pass — eliminating the team-scoping round trip
+
+The team-isolation work (commits `9007f5d`, `bd8f2a4` + the stats/activity follow-up) closed a real data leak between Leads. It also introduced a performance regression, which this pass removes.
+
+### 6.1 The regression
+
+`visibleMemberIds(actor)` resolved a Lead's team by querying `team_members` **before** the query that actually needed it. With the database in `us-east-1` and users elsewhere, that turned every scoped request into two sequential round trips. Measured against a ~245 ms round-trip floor:
+
+| Endpoint | Caller | Before | Round trips |
+|---|---|---:|---|
+| `/tasks/board` | super-admin (unscoped) | 258 ms | 1 |
+| `/tasks/board` | **Lead** | **481 ms** | **2** |
+| `/tasks` | super-admin | 247 ms | 1 |
+| `/tasks` | **Lead** | **508 ms** | **2** |
+
+Every Lead paid ~240 ms extra on every board poll, every reports refresh, every stats read — the exact hot path the earlier passes had worked to get down to one trip.
+
+### 6.2 The fix: scope as a filter, not a lookup
+
+The scope is fully determined by `(role, sub)`, which the JWT already carries — so it never needed a lookup at all. `utils/scope.ts` was rewritten to emit **filters** instead of an id list:
+
+- `memberScopeFilter()` → a `TeamMemberWhereInput` (`{ OR: [{ id: sub }, { managed_by_id: sub }] }` for a Lead)
+- `taskScopeWhere()` / `assignmentScopeWhere()` / `timeLogScopeWhere()` → nested relation filters resolved inside the main query
+- `memberScopeSql()` → the same restriction as a SQL subquery on `team_members`, for the raw aggregates in stats
+- `scopeCacheKey()` → `role:sub`, which identifies the scope exactly with no lookup
+
+Applied across `tasks.list`, `tasks.boardBundle`, `taskAssignments.list`, `timeLogs.list`, `activity` and both stats functions. Result — Leads now match unscoped callers at the round-trip floor:
+
+| Endpoint | Caller | Before | After |
+|---|---|---:|---:|
+| `/tasks/board` | Lead | 481 ms | **252 ms** |
+| `/tasks` | Lead | 508 ms | **250 ms** |
+
+**~2x faster on every Lead request**, with identical results.
+
+Two details that mattered while doing it:
+
+- **`memberId` is intersected, not merged.** On the board bundle the requested member and the caller's scope must be satisfied by the *same* assignment row, so an out-of-team `member_id` matches nothing instead of widening the query. Same for stats.
+- **`has_logged_time` stays task-wide.** It drives the completed-task lock, so it must not weaken just because the viewer can't see whose hours they were. The `time_logs` include is therefore left *unfiltered* (preserving the committed behaviour exactly) and the returned rows are narrowed in the loop instead, via `isMemberInScope()` using a `managed_by_id` selected alongside — still one query.
+
+Cross-team assignees and their logged hours are now filtered **in-query** rather than discarded in JS, so those rows never leave the database.
+
+### 6.3 Sidebar: counting in the database
+
+`Sidebar.tsx` downloaded the entire `subscriptions` table on an interval, for every Admin/super-admin session, purely to count the ones expiring within 7 days. It now calls `GET /subscriptions/expiring-count?before=<date>` and gets back a single integer (1826 bytes → 11 bytes on the test fixture).
+
+The cutoff date is still computed **client-side** and passed in, deliberately: it is derived from the browser's local date, and moving that arithmetic to the server would shift the boundary by a day for anyone whose timezone differs from the server's — the same class of bug the board's date handling avoids.
+
+**This one only worked because it was tested.** The first implementation used `lte` and returned **3** where the old client-side filter returned **2**. The original compared a serialized timestamp (`"2026-09-06T00:00:00.000Z"`) against a bare date string (`"2026-09-06"`); lexically the longer string sorts *greater*, so a subscription lapsing *exactly* on the cutoff never counted. The query uses `lt` to reproduce that exactly.
+
+That is arguably an off-by-one in the original rule — a subscription expiring exactly 7 days out doesn't show in the badge. **Changing which subscriptions the badge counts is a product decision, not part of moving the count into the database**, so the existing behaviour was preserved and the quirk is flagged here instead.
+
+### 6.4 Audited, already done
+
+- `ProjectTable`, `AdminTaskTable`, `ReportsTable` — all already memoized with data-only comparators.
+- `UsersTable` — parent does not poll, so memoizing gains nothing.
+- `TeamAnalytics` — already `dynamic(..., { ssr: false })` and takes no props.
+- Scoping index coverage — `TeamMember.managed_by_id` and `TaskAssignment.member_id` are both already indexed, so the new nested-relation joins are index-backed. Confirmed empirically: scoped requests sit at the round-trip floor, i.e. query execution is negligible.
+
+
+---
+
+## 7. Already-shipped work in this codebase (prior commits, not this pass)
 
 For completeness — these landed in earlier commits (`977e02f`, `1cd7c73`, `23cfd0d`, `b83ec4a`) as part of the same overall effort to make the board handle real concurrent load, and materially matter to "1000+ users" as much as anything above:
 
@@ -187,7 +249,7 @@ For completeness — these landed in earlier commits (`977e02f`, `1cd7c73`, `23c
 
 ---
 
-## 7. Recommendations (identified, not applied)
+## 8. Recommendations (identified, not applied)
 
 Each of these needs either information I don't have, or is a real behavior change (not a pure optimization) that deserves a deliberate yes/no rather than being silently folded in here.
 
@@ -195,7 +257,6 @@ Each of these needs either information I don't have, or is a real behavior chang
 |---|---|
 | **Prisma `connection_limit` on `DATABASE_URL`** | The DB is Neon (pooled endpoint, PgBouncer already in front). Prisma's own pool defaults to `num_cpus*2+1`, sitting on top of that pooler. The right number depends on the app server's CPU count and the Neon plan's max connections — neither of which I have visibility into. Setting it blind risks either starving the pool or exceeding Neon's connection cap. **Action needed:** tell me the deployment's CPU count and Neon tier, or run `SHOW max_connections` against the pooler, and I'll set it correctly. |
 | **`bcryptjs` → native `bcrypt`** | `bcryptjs` is pure JS and CPU-bound; native `bcrypt` (C++ bindings) is meaningfully faster per hash. Only matters during login/password-change (not a per-request hot path), so it's a real but lower-priority win — and swapping a native dependency needs a build-toolchain check on the deploy target first. |
-| **Sidebar's subscriptions over-fetch** | The *frequency* was addressed this pass (poll dropped 8s → 60s, see §4.F). What remains: it still pulls the full unfiltered `GET /subscriptions` table each poll just to count ones expiring within 7 days. A scoped `?expiring_within=7d` endpoint (or a `count`-only response) would cut that payload to near-nothing — needs a dedicated pass with the same live-API date-math verification rigor as the board fixes. |
 | **Rate limiting** | No rate limiter exists anywhere in the API. This is squarely a *new behavior* question (what should happen to the 1001st request in a burst — queue, reject, throttle?) rather than an optimization, so it's explicitly out of scope for a "don't change logic" pass. Worth a deliberate conversation before adding one. |
 | **`@@index([created_at])` on `Task` (and `Project.created_at`, `Subscription.created_at`)** | Infra-gated — requires a migration against a live DB. This is the single highest-value index in the app: `Task.created_at` is the sort/WHERE column for the admin-tasks `listWithCount`, the dashboard recent-tasks + status-aggregate queries, the board's ordering, and (with `deadline`) the daily sort. Right now each of those is a sequential table scan + in-memory sort of the whole tasks table on every 8s poll. Adding it turns those into index scans. Needs infra/DB-timing approval; not silently folded in. |
 | **Daily page's 3 unbounded reads / tick** | `/daily` polls `GET /tasks` (no limit), `GET /task-assignments` (no filter → whole table), and `GET /time-logs` (IN over every task id) every 8s. Fixing this properly means either server-side caps + the client passing `member_id`/date bounds, or a `task_assignments`/`tasks` index — both change the response for the current client or need a migration. Behavior/infra-gated; the app is correct, just heavy here. |
@@ -206,7 +267,7 @@ Each of these needs either information I don't have, or is a real behavior chang
 
 ---
 
-## 8. Verification
+## 9. Verification
 
 Every change was checked with the strongest tool available for it, not just "it compiles":
 
@@ -219,5 +280,11 @@ Every change was checked with the strongest tool available for it, not just "it 
 - **Second pass (`tsc --noEmit` + `next build`)** — clean; all 16 routes compile and typecheck with the new `stabilize.ts` and the two memoized tables in place.
 - **Third pass (`tsc --noEmit` + `next build` + `npm run build`)** — backend `tsc` build and frontend `tsc --noEmit`+`next build` are all clean with the new cache single-flight, stats join rewrite, users `select`, and the frontend churn fixes. ESLint on the newly-touched files reports only the same pre-existing `no-explicit-any` / `set-state-in-effect` failures that already exist on `main` for those files (the app's pages rely on `any`-typed API payloads); the changes themselves introduce no new error classes and wherever possible removed `any` (dashboard arrays are now typed rather than cast).
 - **No `git diff` outside the intended files**: pass one touched `backend/src/modules/files/files.routes.ts`, `backend/src/server.ts`, `backend/src/utils/cache.ts`, `frontend/src/features/reports/components/ReportsTable.tsx`; pass two touched `frontend/src/lib/stabilize.ts` (new), `frontend/src/app/admin/tasks/_hooks/useAdminTasksState.ts`, `frontend/src/app/admin/tasks/_components/AdminTaskTable.tsx`, `frontend/src/app/projects/page.tsx`, `frontend/src/app/projects/_components/ProjectTable.tsx`; pass three touched `backend/src/utils/cache.ts`, `backend/src/modules/stats/stats.service.ts`, `backend/src/modules/tasks/tasks.service.ts`, `backend/src/modules/users/users.service.ts`, `backend/src/modules/users/users.mapper.ts`, `frontend/src/components/UserContext.tsx`, `frontend/src/app/dashboard/page.tsx`, `frontend/src/app/admin/activity/page.tsx`, `frontend/src/components/Sidebar.tsx`, `frontend/src/app/reports/page.tsx`, `frontend/src/app/projects/[id]/_hooks/useProjectState.ts`.
+
+- **Fourth pass** — backend `tsc --noEmit` and frontend `next build` clean; ESLint clean on every file touched this pass (`Sidebar.tsx`, `misc.ts`, `ReportsTable.tsx`). Verified against the **live API**, not just by reading code:
+  - **Team isolation re-verified after the scope refactor** — a Lead managing nobody, a Lead managing two Members, and super-admin each returned byte-identical counts to the pre-refactor baseline across `/tasks`, `/task-assignments`, `/time-logs`, `/tasks/board`, `/stats/dashboard` and `/stats/projects`; all four cross-team tamper attempts (`?member_id=<another Lead's member>`) still return empty.
+  - **Latency measured before and after** on the running server (8-iteration warm averages), confirming the 481 ms → 252 ms improvement rather than assuming it.
+  - **Subscriptions count** — seeded six fixtures covering both date columns and the exact-cutoff boundary, compared the new DB count against the old client-side filter, caught a real `lte`/`lt` mismatch, fixed it, re-verified identical, then deleted every fixture (confirmed 0 rows remain).
+  - Probe Lead accounts created for isolation testing were deleted after each run (confirmed absent from `/users`).
 
 No pass changes what the application does — only how much work it does to do it.

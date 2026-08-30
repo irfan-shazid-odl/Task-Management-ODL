@@ -2,7 +2,13 @@ import { prisma } from '../../config/prisma.js';
 import type { Prisma } from '@prisma/client';
 import { serialize } from '../../utils/serialize.js';
 import { ApiError } from '../../utils/ApiError.js';
-import { visibleMemberIds, taskScopeWhere, type Actor } from '../../utils/scope.js';
+import {
+  taskScopeWhere,
+  assignmentScopeWhere,
+  memberScopeFilter,
+  isMemberInScope,
+  type Actor,
+} from '../../utils/scope.js';
 
 const CARRY_STATUSES = ['Todo', 'Working', 'On Review'];
 
@@ -73,8 +79,8 @@ function buildOrder(f: TaskListFilter): Prisma.TaskOrderByWithRelationInput {
 export async function list(f: TaskListFilter) {
   // Team scoping is applied here rather than at the route so every caller of
   // list() inherits it — a Lead must never receive another Lead's tasks.
-  const scopeIds = f.actor ? await visibleMemberIds(f.actor) : null;
-  const scopeWhere = taskScopeWhere(scopeIds);
+  // Resolved as a nested filter in this same query, not a preceding lookup.
+  const scopeWhere = taskScopeWhere(f.actor);
   const baseWhere = buildWhere(f);
   const where: Prisma.TaskWhereInput = scopeWhere
     ? { AND: [baseWhere, scopeWhere] }
@@ -137,31 +143,48 @@ export async function boardBundle(f: BoardBundleFilter) {
   // (project, assignees, time logs, reference doc) hangs off Task, so Prisma
   // can resolve the whole graph in a single pipelined call instead of the
   // five separate requests the client used to chain.
-  // Team scoping. On the "All Members" central board this is what keeps a
-  // Lead's view to their own team; on a single-member board it additionally
-  // rejects asking for a member outside that team, so the memberId parameter
-  // can't be used to read another Lead's people.
-  const scopeIds = f.actor ? await visibleMemberIds(f.actor) : null;
-  if (f.memberId && scopeIds && !scopeIds.includes(f.memberId)) {
-    return { tasks: [], memberAssignments: [], assignments: [], timeLogs: [], documents: [] };
-  }
-
-  const scopeWhere = taskScopeWhere(scopeIds);
+  // Team scoping. On the "All Members" central board this keeps a Lead's view
+  // to their own team; on a single-member board the requested member must also
+  // be in scope, so the memberId parameter can't be used to read another
+  // Lead's people. Both are folded into this one query's filters rather than
+  // resolved by a preceding lookup.
+  const memberScope = memberScopeFilter(f.actor);
+  const scopeWhere = taskScopeWhere(f.actor);
   const baseWhere = buildWhere(f);
+
   const and: Prisma.TaskWhereInput[] = [baseWhere];
   if (scopeWhere) and.push(scopeWhere);
-  // Member board: scope to tasks this member is assigned to. Replaces the
-  // old "fetch their assignments, then re-query tasks by id" pair.
-  if (f.memberId) and.push({ assignments: { some: { member_id: f.memberId } } });
+  // Member board: scope to tasks this member is assigned to. Replaces the old
+  // "fetch their assignments, then re-query tasks by id" pair. Requiring the
+  // same assignment row to match both the requested member and the caller's
+  // scope means an out-of-team memberId simply matches nothing.
+  if (f.memberId) {
+    and.push({
+      assignments: {
+        some: memberScope
+          ? { AND: [{ member_id: f.memberId }, { member: memberScope }] }
+          : { member_id: f.memberId },
+      },
+    });
+  }
 
   const rows = await prisma.task.findMany({
     where: and.length === 1 ? baseWhere : { AND: and },
     orderBy: buildOrder(f),
     include: {
       project: PROJECT_SELECT,
-      assignments: true,
+      // A task can be shared across teams: it stays visible because one of the
+      // caller's own people is on it, but the other team's assignees and their
+      // logged hours must not come along with it. Filtered in-query rather
+      // than discarded in JS afterwards, so the rows never leave the database.
+      assignments: { where: assignmentScopeWhere(f.actor) },
       reference_doc: true,
-      time_logs: true,
+      // Deliberately NOT filtered here: has_logged_time below is a task-wide
+      // fact (it drives the completed-task lock, which must not weaken just
+      // because the viewer can't see whose hours they were). The rows are
+      // narrowed to the caller's scope in the loop instead, using the member's
+      // managed_by_id selected alongside.
+      time_logs: { include: { member: { select: { id: true, managed_by_id: true } } } },
     },
   });
 
@@ -187,20 +210,19 @@ export async function boardBundle(f: BoardBundleFilter) {
 
     tasks.push({ ...task, has_logged_time: hasLoggedTime });
 
-    // A task can be shared across teams: it stays visible because one of the
-    // caller's own people is on it, but the other team's assignees and their
-    // logged hours must not come along with it.
+    // Already narrowed to the caller's scope by the include filters above.
     for (const a of rowAssignments) {
-      if (scopeIds && !scopeIds.includes(a.member_id)) continue;
       assignments.push(a);
       if (f.memberId && a.member_id === f.memberId) memberAssignments.push(a);
     }
 
     // The board reads log.task.project.id when tallying which projects were
-    // touched, so re-attach the parent the nested shape dropped.
+    // touched, so re-attach the parent the nested shape dropped. Rows with no
+    // member belong to nobody and stay visible, matching the previous filter.
     for (const log of time_logs) {
-      if (scopeIds && log.member_id && !scopeIds.includes(log.member_id)) continue;
-      timeLogs.push({ ...log, task: { ...task, project: row.project } });
+      const { member, ...plain } = log;
+      if (log.member_id && !isMemberInScope(f.actor, member)) continue;
+      timeLogs.push({ ...plain, task: { ...task, project: row.project } });
     }
 
     if (reference_doc) documentsById.set(reference_doc.id, reference_doc);

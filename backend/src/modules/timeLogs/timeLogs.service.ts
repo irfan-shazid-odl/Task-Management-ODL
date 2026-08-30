@@ -1,7 +1,7 @@
 import { prisma } from '../../config/prisma.js';
 import type { Prisma } from '@prisma/client';
 import { serialize } from '../../utils/serialize.js';
-import { visibleMemberIds, type Actor } from '../../utils/scope.js';
+import { timeLogScopeWhere, type Actor } from '../../utils/scope.js';
 
 interface ListFilter {
   taskIds?: string[];
@@ -15,22 +15,15 @@ interface ListFilter {
 
 export async function list(filter: ListFilter) {
   // Hours booked by people outside the caller's team never come back, so a
-  // Lead's /reports totals only ever add up their own team's work.
-  const scopeIds = filter.actor ? await visibleMemberIds(filter.actor) : null;
-
-  // As in taskAssignments.list(): intersect an explicit member_id with the
-  // scope rather than letting it overwrite the restriction.
-  let memberWhere: { member_id?: string | { in: string[] } } = {};
-  if (filter.memberId) {
-    if (scopeIds && !scopeIds.includes(filter.memberId)) return [];
-    memberWhere = { member_id: filter.memberId };
-  } else if (scopeIds) {
-    memberWhere = { member_id: { in: scopeIds } };
-  }
+  // Lead's /reports totals only ever add up their own team's work. Applied as
+  // a nested relation filter (no extra round trip); an explicit member_id is
+  // intersected with it rather than replacing it.
+  const scope = timeLogScopeWhere(filter.actor);
 
   const where: Prisma.TimeLogWhereInput = {
     ...(filter.taskIds ? { task_id: { in: filter.taskIds } } : {}),
-    ...memberWhere,
+    ...(filter.memberId ? { member_id: filter.memberId } : {}),
+    ...(scope ?? {}),
     ...(filter.logDateGte || filter.logDateLte
       ? {
           log_date: {

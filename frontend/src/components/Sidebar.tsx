@@ -33,14 +33,11 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
         nextWeek.setDate(nextWeek.getDate() + 7);
         const nextWeekStr = nextWeek.toISOString().split('T')[0];
 
-        const subs = await api.subscriptions.list();
-        const expiring = (subs || []).filter(
-          s =>
-            (s.end_date != null && s.end_date <= nextWeekStr) ||
-            (s.trial_expiration_date != null && s.trial_expiration_date <= nextWeekStr)
-        );
-        
-        setExpiringSubs(expiring.length);
+        // Counted in the database rather than by downloading every
+        // subscription and filtering here. The cutoff is still computed
+        // locally, so the date boundary is identical to before.
+        const { count } = await api.subscriptions.expiringCount(nextWeekStr);
+        setExpiringSubs(count);
       } catch (err) {
         console.error('Failed to fetch subscriptions', err);
       }

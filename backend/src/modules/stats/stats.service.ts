@@ -1,24 +1,9 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../config/prisma.js';
 import { cache } from '../../utils/cache.js';
-import { visibleMemberIds, type Actor } from '../../utils/scope.js';
+import { memberScopeFilter, memberScopeSql, scopeCacheKey, type Actor } from '../../utils/scope.js';
 
 const CACHE_TTL = 120_000; // 2 minutes
-
-const EMPTY_DASHBOARD = {
-  totalActiveTasks: 0,
-  statusCounts: [
-    { status: 'Todo', count: 0 },
-    { status: 'Working', count: 0 },
-    { status: 'On Review', count: 0 },
-    { status: 'Complete', count: 0 },
-  ],
-  totalWorkingHours: 0,
-  totalBillingHours: 0,
-  projectHours: [] as { id: string; name: string; category: string; hours: number }[],
-  totalProjects: 0,
-  totalMembers: 0,
-};
 
 export async function getDashboardStats(
   memberId?: string,
@@ -27,24 +12,31 @@ export async function getDashboardStats(
   actor?: Actor,
 ) {
   // Restrict every aggregate below to the people this caller may see, so a
-  // Lead's totals never include another Lead's team.
-  const scopeIds = actor ? await visibleMemberIds(actor) : null;
-
-  // An explicit memberId is intersected with the scope, never merged over it.
-  if (memberId && scopeIds && !scopeIds.includes(memberId)) return EMPTY_DASHBOARD;
-  const effectiveMemberIds = memberId ? [memberId] : scopeIds;
+  // Lead's totals never include another Lead's team. Expressed as filters, so
+  // none of this costs an extra round trip to resolve the team first.
+  const memberScope = memberScopeFilter(actor);
 
   // The scope MUST be part of the cache key. Without it, two Leads share one
   // entry and whichever misses first serves its team's numbers to the other —
-  // turning the cache itself into the leak.
-  const scopeKey = scopeIds ? `s:${[...scopeIds].sort().join('.')}` : 's:all';
-  const cacheKey = `dashboard-stats-${scopeKey}-${memberId || 'all'}-${startDate || 'none'}-${endDate || 'none'}`;
+  // turning the cache itself into the leak. (role, sub) identifies the scope
+  // exactly, so the key needs no member lookup either.
+  const cacheKey = `dashboard-stats-${scopeCacheKey(actor)}-${memberId || 'all'}-${startDate || 'none'}-${endDate || 'none'}`;
 
   return cache.getOrCompute(cacheKey, CACHE_TTL, async () => {
+    // An explicit memberId is intersected with the scope, never merged over
+    // it: requiring one assignment row to satisfy both means an out-of-team
+    // memberId simply matches nothing.
+    const assignmentScope: Prisma.TaskAssignmentWhereInput | undefined =
+      memberId && memberScope
+        ? { AND: [{ member_id: memberId }, { member: memberScope }] }
+        : memberId
+          ? { member_id: memberId }
+          : memberScope
+            ? { member: memberScope }
+            : undefined;
+
     const taskWhere: Prisma.TaskWhereInput = {};
-    if (effectiveMemberIds) {
-      taskWhere.assignments = { some: { member_id: { in: effectiveMemberIds } } };
-    }
+    if (assignmentScope) taskWhere.assignments = { some: assignmentScope };
     if (startDate || endDate) {
       taskWhere.created_at = {};
       if (startDate) taskWhere.created_at.gte = new Date(startDate + 'T00:00:00Z');
@@ -52,7 +44,8 @@ export async function getDashboardStats(
     }
 
     const logWhere: Prisma.TimeLogWhereInput = {};
-    if (effectiveMemberIds) logWhere.member_id = { in: effectiveMemberIds };
+    if (memberId) logWhere.member_id = memberId;
+    if (memberScope) logWhere.member = memberScope;
     if (startDate || endDate) {
       logWhere.log_date = {};
       if (startDate) logWhere.log_date.gte = new Date(startDate);
@@ -60,13 +53,11 @@ export async function getDashboardStats(
     }
 
     const conditions: Prisma.Sql[] = [];
-    if (effectiveMemberIds) {
-      conditions.push(
-        Prisma.sql`tl.member_id IN (${Prisma.join(
-          effectiveMemberIds.map((id) => Prisma.sql`${id}::uuid`),
-        )})`,
-      );
+    if (memberId) {
+      conditions.push(Prisma.sql`tl.member_id = ${memberId}::uuid`);
     }
+    const scopeSql = memberScopeSql(Prisma.sql`tl.member_id`, actor);
+    if (scopeSql) conditions.push(scopeSql);
     if (startDate) {
       conditions.push(Prisma.sql`tl.log_date >= ${startDate}::date`);
     }
@@ -111,9 +102,8 @@ export async function getDashboardStats(
       prisma.project.count(),
       // Headcount is the caller's own team, not the whole org — an unscoped
       // count would tell one Lead how many people every other Lead manages.
-      effectiveMemberIds
-        ? Promise.resolve(effectiveMemberIds.length)
-        : prisma.teamMember.count(),
+      // Runs inside the existing Promise.all, so it adds no extra wall time.
+      prisma.teamMember.count({ where: memberScope }),
     ]);
 
     let totalActive = 0;
@@ -159,25 +149,24 @@ export async function getDashboardStats(
 export async function getProjectsStats(actor?: Actor) {
   // The /projects page shows these hour and task counts to Leads, so they must
   // only ever aggregate the caller's own team's work.
-  const scopeIds = actor ? await visibleMemberIds(actor) : null;
-
+  //
   // Scope belongs in the cache key — otherwise the first Lead to miss the
   // cache populates it with their team's numbers for everyone else.
-  const scopeKey = scopeIds ? `s:${[...scopeIds].sort().join('.')}` : 's:all';
-  const cacheKey = `projects-stats-${scopeKey}`;
+  const cacheKey = `projects-stats-${scopeCacheKey(actor)}`;
 
   return cache.getOrCompute(cacheKey, CACHE_TTL, async () => {
     // Restricts the hour sums to the caller's people, and the task count to
-    // tasks at least one of them is assigned to. Unscoped callers (Admin+)
-    // get the plain org-wide totals exactly as before.
-    const logScope = scopeIds
-      ? Prisma.sql`AND tl.member_id IN (${Prisma.join(scopeIds.map((id) => Prisma.sql`${id}::uuid`))})`
-      : Prisma.sql``;
-    const taskScope = scopeIds
+    // tasks at least one of them is assigned to. Both are SQL subqueries on
+    // team_members rather than an inlined id list, so the team never has to be
+    // fetched first. Unscoped callers (Admin+) get the plain org-wide totals
+    // exactly as before.
+    const tlScope = memberScopeSql(Prisma.sql`tl.member_id`, actor);
+    const taScope = memberScopeSql(Prisma.sql`ta.member_id`, actor);
+    const logScope = tlScope ? Prisma.sql`AND ${tlScope}` : Prisma.sql``;
+    const taskScope = taScope
       ? Prisma.sql`WHERE EXISTS (
           SELECT 1 FROM task_assignments ta
-          WHERE ta.task_id = tasks.id
-            AND ta.member_id IN (${Prisma.join(scopeIds.map((id) => Prisma.sql`${id}::uuid`))})
+          WHERE ta.task_id = tasks.id AND ${taScope}
         )`
       : Prisma.sql``;
 

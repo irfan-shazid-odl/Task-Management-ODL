@@ -5,7 +5,7 @@ import { asyncHandler } from '../../utils/asyncHandler.js';
 import { requireAuth } from '../../middleware/auth.js';
 import { validate } from '../../middleware/validate.js';
 import { serialize } from '../../utils/serialize.js';
-import { visibleMemberIds } from '../../utils/scope.js';
+import { memberScopeFilter } from '../../utils/scope.js';
 
 const createSchema = z.object({
   project_id: z.string().uuid().nullable().optional(),
@@ -40,23 +40,16 @@ activityRouter.get(
     const limit = req.query.limit ? Number(req.query.limit) : 500;
 
     // Activity rows carry member names and what they did, so they are scoped
-    // to the caller's team like tasks and time logs are. An explicit
-    // member_id is intersected with that scope, never merged over it.
-    const scopeIds = await visibleMemberIds(req.user!);
-    if (memberId && scopeIds && !scopeIds.includes(memberId)) {
-      res.json([]);
-      return;
-    }
-    const memberWhere: { member_id?: string | { in: string[] } } = memberId
-      ? { member_id: memberId }
-      : scopeIds
-        ? { member_id: { in: scopeIds } }
-        : {};
+    // to the caller's team like tasks and time logs are. A nested relation
+    // filter keeps it to this one query; an explicit member_id is intersected
+    // with the scope, never merged over it.
+    const memberScope = memberScopeFilter(req.user!);
 
     const rows = await prisma.activityLog.findMany({
       where: {
         ...(projectId ? { project_id: projectId } : {}),
-        ...memberWhere,
+        ...(memberId ? { member_id: memberId } : {}),
+        ...(memberScope ? { member: memberScope } : {}),
         ...(createdFrom || createdTo
           ? {
               created_at: {

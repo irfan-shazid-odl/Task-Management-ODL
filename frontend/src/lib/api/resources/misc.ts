@@ -22,6 +22,14 @@ export const subscriptionsApi = {
   list(): Promise<Subscription[]> {
     return apiFetch<Subscription[]>('/subscriptions');
   },
+  // Count of subscriptions lapsing strictly before `before` (a YYYY-MM-DD the
+  // caller computes in its own timezone). Used by the sidebar badge so it
+  // doesn't have to download every subscription just to count a few.
+  // Strictly-before, not on-or-before, to match the string comparison the
+  // badge previously did client-side — see the route for the full reasoning.
+  expiringCount(before: string): Promise<{ count: number }> {
+    return apiFetch<{ count: number }>('/subscriptions/expiring-count', { query: { before } });
+  },
   create(data: ApiInput<Sub> & { name: string; email: string; start_date: string }): Promise<Subscription> {
     return apiFetch('/subscriptions', { method: 'POST', body: data });
   },
