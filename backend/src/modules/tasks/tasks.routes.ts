@@ -105,7 +105,7 @@ tasksRouter.patch(
   '/:id',
   validate({ params: idParam, body: taskData.partial() }),
   asyncHandler(async (req, res) => {
-    res.json(await service.updateTask(req.params.id, req.body));
+    res.json(await service.updateTask(req.params.id, req.body, req.user));
   }),
 );
 

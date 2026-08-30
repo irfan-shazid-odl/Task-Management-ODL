@@ -1,5 +1,7 @@
 import { prisma } from '../../config/prisma.js';
 import { serialize } from '../../utils/serialize.js';
+import { ApiError } from '../../utils/ApiError.js';
+import { hasLoggedTimeForMember } from '../tasks/tasks.service.js';
 
 interface ListFilter {
   taskIds?: string[];
@@ -31,7 +33,24 @@ export async function unassign(taskId: string, memberId: string) {
   return { ok: true };
 }
 
-export async function updateStatus(taskId: string, memberId: string, status: string) {
+export async function updateStatus(
+  taskId: string,
+  memberId: string,
+  status: string,
+  currentUser?: { sub: string; role?: string },
+) {
+  // Once a Member has logged time on the task they can no longer change its
+  // status. Leads, Admins and super-admin are unaffected.
+  if (currentUser?.role === 'Member') {
+    const row = await prisma.taskAssignment.findUnique({
+      where: { task_id_member_id: { task_id: taskId, member_id: memberId } },
+      select: { status: true },
+    });
+    if (status !== row?.status && (await hasLoggedTimeForMember(taskId, memberId))) {
+      throw ApiError.forbidden('You cannot change the status after logging time for this task.');
+    }
+  }
+
   await prisma.taskAssignment.updateMany({
     where: { task_id: taskId, member_id: memberId },
     data: { status },

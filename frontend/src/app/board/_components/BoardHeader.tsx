@@ -18,7 +18,7 @@ interface TeamMember {
   is_paused?: boolean;
 }
 
-interface BoardHeaderProps {
+export interface BoardHeaderProps {
   viewLabel: string;
   viewMode: ViewMode;
   // Gates the "All Members" board switcher + PDF Summary export — super-admin
@@ -70,7 +70,30 @@ interface BoardHeaderProps {
   onRefresh: () => void;
 }
 
-export default function BoardHeader({
+// BoardHeader only needs to re-render when its own data changes; the callback
+// props are recreated every board render, so we compare only the data props to
+// keep header + dropdowns from re-rendering on unrelated state churn.
+const headerPropsEqual = (prev: BoardHeaderProps, next: BoardHeaderProps) =>
+  prev.viewLabel === next.viewLabel &&
+  prev.viewMode === next.viewMode &&
+  prev.canViewAllMembers === next.canViewAllMembers &&
+  prev.refreshing === next.refreshing &&
+  prev.boardFilterMode === next.boardFilterMode &&
+  prev.boardDate === next.boardDate &&
+  prev.boardCalendarOpen === next.boardCalendarOpen &&
+  prev.boardCalendarViewDate === next.boardCalendarViewDate &&
+  prev.boardCalendarRef === next.boardCalendarRef &&
+  prev.boardMonth === next.boardMonth &&
+  prev.boardProjectId === next.boardProjectId &&
+  prev.boardProjectDropdownOpen === next.boardProjectDropdownOpen &&
+  prev.boardProjectSearch === next.boardProjectSearch &&
+  prev.availableProjects === next.availableProjects &&
+  prev.boardProjectDropdownRef === next.boardProjectDropdownRef &&
+  prev.memberDropdownOpen === next.memberDropdownOpen &&
+  prev.memberDropdownRef === next.memberDropdownRef &&
+  prev.teamMembers === next.teamMembers;
+
+export default memo(function BoardHeader({
   viewLabel,
   viewMode,
   canViewAllMembers,
@@ -247,4 +270,4 @@ export default function BoardHeader({
       </div>
     </div>
   );
-}
+}, headerPropsEqual);

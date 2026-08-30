@@ -105,6 +105,23 @@ export interface TaskData {
   log_date?: string;
 }
 
+// A member "owns" the logged time once they logged any non-zero hours/billing
+// hours on a task. Used to lock status changes for Members after time is logged.
+export async function hasLoggedTimeForMember(taskId: string, memberId: string): Promise<boolean> {
+  const log = await prisma.timeLog.findFirst({
+    where: {
+      task_id: taskId,
+      member_id: memberId,
+      OR: [
+        { hours_logged: { gt: 0 } },
+        { billing_hours: { gt: 0 } },
+      ],
+    },
+    select: { id: true },
+  });
+  return log !== null;
+}
+
 function toTaskCreate(d: TaskData): Prisma.TaskUncheckedCreateInput {
   return {
     project_id: d.project_id ?? null,
@@ -152,7 +169,28 @@ export async function createTask(input: {
 }
 
 // Partial field update (status, description, log_date, or full edit-form payload).
-export async function updateTask(id: string, patch: Partial<TaskData>) {
+export async function updateTask(
+  id: string,
+  patch: Partial<TaskData>,
+  currentUser?: { sub: string; role?: string },
+) {
+  // Once a Member has logged time on a task they can no longer change its
+  // status (no-op status sends still pass). Leads, Admins and super-admin are
+  // unaffected.
+  if (currentUser?.role === 'Member' && patch.status !== undefined) {
+    const existing = await prisma.task.findUnique({
+      where: { id },
+      select: {
+        status: true,
+        assignments: { where: { member_id: currentUser.sub }, select: { status: true } },
+      },
+    });
+    const currentStatus = existing?.assignments[0]?.status ?? existing?.status;
+    if (patch.status !== currentStatus && (await hasLoggedTimeForMember(id, currentUser.sub))) {
+      throw ApiError.forbidden('You cannot change the status after logging time for this task.');
+    }
+  }
+
   const data: Prisma.TaskUncheckedUpdateInput = {
     ...(patch.description !== undefined ? { description: patch.description } : {}),
     ...(patch.status !== undefined ? { status: patch.status } : {}),

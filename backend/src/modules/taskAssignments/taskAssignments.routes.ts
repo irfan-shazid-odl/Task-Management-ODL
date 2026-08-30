@@ -56,7 +56,7 @@ taskAssignmentsRouter.patch(
   '/status',
   validate({ body: statusBody }),
   asyncHandler(async (req, res) => {
-    res.json(await service.updateStatus(req.body.task_id, req.body.member_id, req.body.status));
+    res.json(await service.updateStatus(req.body.task_id, req.body.member_id, req.body.status, req.user));
   }),
 );
 

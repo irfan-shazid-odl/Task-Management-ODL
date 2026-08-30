@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { memo } from 'react';
 import { Task } from '@/lib/types';
 import TaskTableRow from '@/components/TaskTableRow';
 import { Skeleton } from '@/components/Skeleton';
@@ -24,7 +24,7 @@ interface BoardTaskListTableProps {
   onUpdate: () => void;
 }
 
-export default function BoardTaskListTable({
+function BoardTaskListTable({
   loading,
   tableTasks,
   todaysActivity,
@@ -124,3 +124,15 @@ export default function BoardTaskListTable({
     </div>
   );
 }
+
+export default memo(BoardTaskListTable, (prev, next) =>
+  prev.loading === next.loading &&
+  prev.tableTasks === next.tableTasks &&
+  prev.todaysActivity === next.todaysActivity &&
+  prev.todaysTotalHours === next.todaysTotalHours &&
+  prev.todaysTotalBillingHours === next.todaysTotalBillingHours &&
+  prev.todaysTotalProjects === next.todaysTotalProjects &&
+  prev.showTasksTable === next.showTasksTable &&
+  prev.boardDate === next.boardDate &&
+  prev.viewMode === next.viewMode
+);

@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable react-hooks/set-state-in-effect */
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, startTransition } from 'react';
 import { useUser } from '@/components/UserContext';
 import { Task, TaskStatus, TaskPriority, TaskCategory, TASK_STATUSES } from '@/lib/types';
 import { api, subscribeToChanges } from '@/lib/api';
@@ -129,12 +129,11 @@ export function useBoardState() {
       api.taskAssignments.list({ taskIds }),
     ]);
 
-    const memberIds = [...new Set((rawAssignments || []).map((a: any) => a.member_id).filter(Boolean))];
+    const memberIds = new Set((rawAssignments || []).map((a: any) => a.member_id).filter(Boolean));
     const memberMap = new Map<string, any>();
-    if (memberIds.length > 0) {
-      const members = (await api.users.list()).filter((m: any) => memberIds.includes(m.id));
-      (members || []).forEach((m: any) => memberMap.set(m.id, m));
-    }
+    (teamMembers || []).forEach((m: any) => {
+      if (memberIds.has(m.id)) memberMap.set(m.id, m);
+    });
 
     const workingHoursByTaskId = new Map<string, number>();
     const billingHoursByTaskId = new Map<string, number>();
@@ -182,10 +181,21 @@ export function useBoardState() {
       }
     });
 
-    setTodaysActivity(activityMap);
     setTodaysTotalHours(totalWorking);
     setTodaysTotalBillingHours(totalBilling);
     setTodaysTotalProjects(projectSet.size);
+
+    // Only swap the activity map when it actually changed, so memoized table
+    // rows don't re-render on identical polls.
+    const activitySig = JSON.stringify(
+      Object.keys(activityMap)
+        .sort()
+        .map((id) => `${id}:${activityMap[id].working}:${activityMap[id].billing}`)
+    );
+    if (activitySig !== activitySigRef.current) {
+      activitySigRef.current = activitySig;
+      setTodaysActivity(activityMap);
+    }
 
     const refDocMap = new Map<string, any>();
     (refDocs || []).forEach((d: any) => refDocMap.set(d.id, d));
@@ -204,7 +214,7 @@ export function useBoardState() {
       total_billing_hours: billingHoursByTaskId.get(task.id) || 0,
       reference_doc: task.reference_doc_id ? (refDocMap.get(task.reference_doc_id) || null) : null,
     }));
-  }, [boardDate, boardFilterMode, boardMonth, viewMode, currentUser?.id, setTodaysActivity, setTodaysTotalHours, setTodaysTotalBillingHours, setTodaysTotalProjects]);
+  }, [boardDate, boardFilterMode, boardMonth, viewMode, currentUser?.id, teamMembers, setTodaysActivity, setTodaysTotalHours, setTodaysTotalBillingHours, setTodaysTotalProjects]);
 
   const fetchTasks = useCallback(async () => {
     if (!currentUser) { setLoading(false); return; }
@@ -249,7 +259,8 @@ export function useBoardState() {
       if (viewMode === 'all') {
         const tasksData = await api.tasks.list(baseParams);
         if (fetchSeqRef.current !== fetchSeq) return;
-        setTasks((tasksData.length ? await enrichTasks(tasksData) : []) as Task[]);
+        const enriched = (tasksData.length ? await enrichTasks(tasksData) : []) as Task[];
+        startTransition(() => setTasks(stabilizeTasks(enriched)));
         setLoading(false); setRefreshing(false); return;
       }
 
@@ -303,7 +314,8 @@ export function useBoardState() {
       }
 
       if (fetchSeqRef.current !== fetchSeq) return;
-      setTasks((filteredTasks.length ? await enrichTasks(filteredTasks) : []) as Task[]);
+      const enriched = (filteredTasks.length ? await enrichTasks(filteredTasks) : []) as Task[];
+      startTransition(() => setTasks(stabilizeTasks(enriched)));
     } catch {
       if (fetchSeqRef.current !== fetchSeq) return;
       setTasks([]);
@@ -350,14 +362,14 @@ export function useBoardState() {
     return map;
   }, [tasks, getDisplayStatus]);
   const tasksByStatus = useCallback((status: TaskStatus) => tasksByStatusMap.get(status) ?? [], [tasksByStatusMap]);
-  const tableTasks = tasks.filter(t => {
+  const tableTasks = useMemo(() => tasks.filter(t => {
     const s = getDisplayStatus(t);
     if (s === 'Todo' || s === 'Working') return true;
     const creationDateStr = t.created_at ? new Date(t.created_at).toLocaleDateString('en-CA') : '';
     const hasActivity = (todaysActivity[t.id]?.working || 0) > 0 || (todaysActivity[t.id]?.billing || 0) > 0;
     const isCreatedToday = creationDateStr === boardDate;
     return hasActivity || isCreatedToday;
-  });
+  }), [tasks, todaysActivity, boardDate, getDisplayStatus]);
 
   const handleRefresh = () => {
     setRefreshing(true);
@@ -373,6 +385,68 @@ export function useBoardState() {
       toast.error(err?.message || 'Failed to delete task');
     }
   }, []);
+
+  // Keep object identity of tasks that did not change between fetches so the
+  // memoized KanbanColumn/TaskCard/table rows skip re-rendering when the 8s
+  // poll returns the same data. Rendering is driven purely by the fields here,
+  // so reusing the previous object is behavior-identical.
+  const tasksByIdRef = useRef<Map<string, { sig: string; task: Task }>>(new Map());
+  const lastTasksRef = useRef<Task[]>([]);
+  const taskSignature = (t: any): string =>
+    JSON.stringify([
+      t.id,
+      t.description,
+      t.status,
+      t.assignment_status,
+      t.priority,
+      t.deadline,
+      t.project_id,
+      t.reference_doc_id,
+      t.category,
+      t.estimated_time,
+      t.log_date,
+      t.created_at,
+      t.updated_at,
+      t.total_logged_hours,
+      t.total_billing_hours,
+      t.project?.name ?? null,
+      t.project?.category ?? null,
+      t.reference_doc?.id ?? null,
+      (t.assignees || []).map((a: any) => `${a.id}:${a.name}:${a.status ?? ''}:${a.assignment_status ?? ''}`).join(','),
+    ]);
+
+  const stabilizeTasks = useCallback((next: Task[]): Task[] => {
+    const prevMap = tasksByIdRef.current;
+    const fresh = new Map<string, { sig: string; task: Task }>();
+    const out = new Array<Task>(next.length);
+    for (let i = 0; i < next.length; i++) {
+      const t = next[i];
+      const sig = taskSignature(t);
+      const old = prevMap.get(t.id);
+      if (old && old.sig === sig) {
+        fresh.set(t.id, old);
+        out[i] = old.task;
+      } else {
+        fresh.set(t.id, { sig, task: t });
+        out[i] = t;
+      }
+    }
+    tasksByIdRef.current = fresh;
+
+    // If every task object is bit-for-bit the same in the same order, hand back
+    // the exact previous array so React bails out of the whole board render.
+    const last = lastTasksRef.current;
+    let same = last.length === out.length;
+    if (same) {
+      for (let i = 0; i < out.length; i++) {
+        if (last[i] !== out[i]) { same = false; break; }
+      }
+    }
+    lastTasksRef.current = same ? last : out;
+    return lastTasksRef.current;
+  }, []);
+
+  const activitySigRef = useRef('');
 
   const fetchTasksRef = useRef(fetchTasks);
   useEffect(() => { fetchTasksRef.current = fetchTasks; }, [fetchTasks]);
@@ -397,7 +471,10 @@ export function useBoardState() {
           if (shouldUpdateLogDate) await api.tasks.update(taskId, { log_date: boardDate });
           await api.taskAssignments.updateStatus(taskId, memberId, newStatus);
         }
-        catch { fetchTasksRef.current(); }
+        catch (err: any) {
+          toast.error(err?.message || 'Failed to update status');
+          fetchTasksRef.current();
+        }
       }
     }
   }, [tasks, currentUser, viewMode, getDisplayStatus, boardDate]);

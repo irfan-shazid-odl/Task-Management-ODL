@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, memo } from 'react';
 import { Task, TaskStatus } from '@/lib/types';
 import { api } from '@/lib/api';
 import { useUser } from './UserContext';
@@ -20,7 +20,7 @@ interface TaskTableRowProps {
   viewMode?: string;
 }
 
-export default function TaskTableRow({ task, todaysHours, todaysBillingHours, onUpdate, boardDate, viewMode }: TaskTableRowProps) {
+function TaskTableRowComponent({ task, todaysHours, todaysBillingHours, onUpdate, boardDate, viewMode }: TaskTableRowProps) {
   const { currentUser } = useUser();
 
   const [hours, setHours] = useState('');
@@ -207,3 +207,12 @@ export default function TaskTableRow({ task, todaysHours, todaysBillingHours, on
     </div>
   );
 }
+
+export default memo(TaskTableRowComponent, (prev, next) =>
+  prev.task === next.task &&
+  prev.todaysHours === next.todaysHours &&
+  prev.todaysBillingHours === next.todaysBillingHours &&
+  prev.onUpdate === next.onUpdate &&
+  prev.boardDate === next.boardDate &&
+  prev.viewMode === next.viewMode
+);
