@@ -4,13 +4,19 @@ import { SYSTEM_ADMIN_EMAIL } from '../../config/env.js';
 import { hashPassword } from '../../utils/password.js';
 import { toPublicMember, toPublicMembers } from './users.mapper.js';
 
-export async function listMembers() {
+export async function listMembers(actor: { sub: string; role: string }) {
+  // Leads only ever see themselves + the Member accounts they created
+  // (managed_by_id = their id). Admin+ sees the whole directory.
+  const where =
+    actor.role === 'Lead' ? { OR: [{ id: actor.sub }, { managed_by_id: actor.sub }] } : undefined;
+
   // Fetch only the public columns — never the bcrypt password_hash — which the
   // mapper was already stripping in memory after the row was read. This avoids
   // transferring the hash from the database on every session start, when this
   // endpoint is fired app-wide for every logged-in user. Response shape is
   // unchanged: the exact same fields toPublicMember() would have returned.
   const members = await prisma.teamMember.findMany({
+    where,
     orderBy: { name: 'asc' },
     select: {
       id: true,
@@ -31,9 +37,12 @@ export async function listMembers() {
   return toPublicMembers(members);
 }
 
-export async function getMember(id: string) {
+export async function getMember(id: string, actor: { sub: string; role: string }) {
   const member = await prisma.teamMember.findUnique({ where: { id } });
   if (!member) throw ApiError.notFound('User not found');
+  const isAdmin = actor.role === 'Admin' || actor.role === 'super-admin';
+  const canView = isAdmin || actor.sub === member.id || member.managed_by_id === actor.sub;
+  if (!canView) throw ApiError.forbidden('You do not have permission to view this user');
   return toPublicMember(member);
 }
 

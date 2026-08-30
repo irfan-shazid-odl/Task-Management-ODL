@@ -2,12 +2,12 @@ import type { Request, Response } from 'express';
 import { ApiError } from '../../utils/ApiError.js';
 import * as service from './users.service.js';
 
-export async function list(_req: Request, res: Response) {
-  res.json(await service.listMembers());
+export async function list(req: Request, res: Response) {
+  res.json(await service.listMembers(req.user!));
 }
 
 export async function getOne(req: Request, res: Response) {
-  res.json(await service.getMember(req.params.id));
+  res.json(await service.getMember(req.params.id, req.user!));
 }
 
 // Which roles each rank may assign to a new account — mirrors the frontend's
