@@ -67,6 +67,10 @@ export default function AdminUsersPage() {
        toast.error("Leads can only remove Members.");
        return;
     }
+    if (currentUser.role === 'Lead' && member.managed_by_id !== currentUser.id) {
+       toast.error("You can only remove Members you created.");
+       return;
+    }
     if (currentUser.role === 'Admin' && member.role === 'Admin') {
        toast.error("Admins cannot remove other Admins.");
        return;

@@ -52,7 +52,7 @@ export async function update(req: Request, res: Response) {
 }
 
 export async function remove(req: Request, res: Response) {
-  res.json(await service.deleteMember(req.params.id));
+  res.json(await service.deleteMember(req.params.id, req.user!));
 }
 
 export async function pause(req: Request, res: Response) {

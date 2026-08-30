@@ -210,7 +210,9 @@ export default function UsersTable({ members, currentUser, onRequestDelete }: Pr
                           )}
                         </button>
                       )}
-                      {(member.role !== 'super-admin' || currentUser?.role === 'super-admin') && (
+                      {/* Leads can only remove the Members they created */}
+                      {(member.role !== 'super-admin' || currentUser?.role === 'super-admin') &&
+                        (currentUser?.role !== 'Lead' || member.managed_by_id === currentUser.id) && (
                         <button
                           onClick={() => onRequestDelete(member)}
                           className="p-1.5 rounded-lg text-slate-400 lg:opacity-0 lg:group-hover:opacity-100 hover:text-red-500 hover:bg-red-50 transition-all"

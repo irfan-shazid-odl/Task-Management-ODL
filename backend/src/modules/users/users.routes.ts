@@ -37,7 +37,7 @@ usersRouter.patch(
 
 usersRouter.delete(
   '/:id',
-  requireRole('Admin'),
+  requireRole('Lead'),
   validate({ params: idParamSchema }),
   asyncHandler(controller.remove),
 );

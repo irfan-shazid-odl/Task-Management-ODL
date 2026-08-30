@@ -101,12 +101,24 @@ export async function updateMember(id: string, input: UpdateInput) {
   return toPublicMember(member);
 }
 
-export async function deleteMember(id: string) {
+export async function deleteMember(
+  id: string,
+  actor: { sub: string; role: string },
+) {
   const target = await prisma.teamMember.findUnique({ where: { id } });
   if (!target) throw ApiError.notFound('User not found');
   if (target.email === SYSTEM_ADMIN_EMAIL) {
     throw ApiError.forbidden('The system administrator account cannot be deleted.');
   }
+
+  // Admins/super-admins may remove anyone (except the system admin above).
+  // Leads may only remove Member accounts they created (managed_by_id = their id).
+  const isAdmin = actor.role === 'Admin' || actor.role === 'super-admin';
+  const leadsOwnMember = actor.role === 'Lead' && target.role === 'Member' && target.managed_by_id === actor.sub;
+  if (!isAdmin && !leadsOwnMember) {
+    throw ApiError.forbidden('Leads can only remove Members they created.');
+  }
+
   await prisma.teamMember.delete({ where: { id } });
   return { ok: true };
 }
