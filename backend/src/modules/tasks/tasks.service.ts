@@ -2,6 +2,7 @@ import { prisma } from '../../config/prisma.js';
 import type { Prisma } from '@prisma/client';
 import { serialize } from '../../utils/serialize.js';
 import { ApiError } from '../../utils/ApiError.js';
+import { visibleMemberIds, taskScopeWhere, type Actor } from '../../utils/scope.js';
 
 const CARRY_STATUSES = ['Todo', 'Working', 'On Review'];
 
@@ -24,6 +25,11 @@ export interface TaskListFilter {
   includeProject?: boolean;
   includeReferenceDoc?: boolean;
   withCount?: boolean;
+  /**
+   * The authenticated caller. Restricts results to the people they may see
+   * (see utils/scope.ts). Admin/super-admin are unrestricted.
+   */
+  actor?: Actor;
 }
 
 function buildWhere(f: TaskListFilter): Prisma.TaskWhereInput {
@@ -65,7 +71,15 @@ function buildOrder(f: TaskListFilter): Prisma.TaskOrderByWithRelationInput {
 }
 
 export async function list(f: TaskListFilter) {
-  const where = buildWhere(f);
+  // Team scoping is applied here rather than at the route so every caller of
+  // list() inherits it — a Lead must never receive another Lead's tasks.
+  const scopeIds = f.actor ? await visibleMemberIds(f.actor) : null;
+  const scopeWhere = taskScopeWhere(scopeIds);
+  const baseWhere = buildWhere(f);
+  const where: Prisma.TaskWhereInput = scopeWhere
+    ? { AND: [baseWhere, scopeWhere] }
+    : baseWhere;
+
   const include: Prisma.TaskInclude = {
     ...(f.includeProject
       ? { project: { select: { id: true, name: true, category: true } } }
@@ -123,14 +137,25 @@ export async function boardBundle(f: BoardBundleFilter) {
   // (project, assignees, time logs, reference doc) hangs off Task, so Prisma
   // can resolve the whole graph in a single pipelined call instead of the
   // five separate requests the client used to chain.
-  const where = buildWhere(f);
+  // Team scoping. On the "All Members" central board this is what keeps a
+  // Lead's view to their own team; on a single-member board it additionally
+  // rejects asking for a member outside that team, so the memberId parameter
+  // can't be used to read another Lead's people.
+  const scopeIds = f.actor ? await visibleMemberIds(f.actor) : null;
+  if (f.memberId && scopeIds && !scopeIds.includes(f.memberId)) {
+    return { tasks: [], memberAssignments: [], assignments: [], timeLogs: [], documents: [] };
+  }
+
+  const scopeWhere = taskScopeWhere(scopeIds);
+  const baseWhere = buildWhere(f);
+  const and: Prisma.TaskWhereInput[] = [baseWhere];
+  if (scopeWhere) and.push(scopeWhere);
+  // Member board: scope to tasks this member is assigned to. Replaces the
+  // old "fetch their assignments, then re-query tasks by id" pair.
+  if (f.memberId) and.push({ assignments: { some: { member_id: f.memberId } } });
 
   const rows = await prisma.task.findMany({
-    // Member board: scope to tasks this member is assigned to. Replaces the
-    // old "fetch their assignments, then re-query tasks by id" pair.
-    where: f.memberId
-      ? { AND: [where, { assignments: { some: { member_id: f.memberId } } }] }
-      : where,
+    where: and.length === 1 ? baseWhere : { AND: and },
     orderBy: buildOrder(f),
     include: {
       project: PROJECT_SELECT,
@@ -162,7 +187,11 @@ export async function boardBundle(f: BoardBundleFilter) {
 
     tasks.push({ ...task, has_logged_time: hasLoggedTime });
 
+    // A task can be shared across teams: it stays visible because one of the
+    // caller's own people is on it, but the other team's assignees and their
+    // logged hours must not come along with it.
     for (const a of rowAssignments) {
+      if (scopeIds && !scopeIds.includes(a.member_id)) continue;
       assignments.push(a);
       if (f.memberId && a.member_id === f.memberId) memberAssignments.push(a);
     }
@@ -170,6 +199,7 @@ export async function boardBundle(f: BoardBundleFilter) {
     // The board reads log.task.project.id when tallying which projects were
     // touched, so re-attach the parent the nested shape dropped.
     for (const log of time_logs) {
+      if (scopeIds && log.member_id && !scopeIds.includes(log.member_id)) continue;
       timeLogs.push({ ...log, task: { ...task, project: row.project } });
     }
 

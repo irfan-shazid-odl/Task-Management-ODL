@@ -39,6 +39,7 @@ taskAssignmentsRouter.get(
       await service.list({
         taskIds: taskIdsRaw ? taskIdsRaw.split(',').filter(Boolean) : undefined,
         memberId: req.query.member_id as string | undefined,
+        actor: req.user,
       }),
     );
   }),

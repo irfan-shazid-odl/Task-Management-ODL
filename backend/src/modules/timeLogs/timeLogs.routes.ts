@@ -43,6 +43,7 @@ timeLogsRouter.get(
         logDateGte: req.query.log_date_gte as string | undefined,
         logDateLte: req.query.log_date_lte as string | undefined,
         includeTaskProject: include.includes('task.project'),
+        actor: req.user,
       }),
     );
   }),

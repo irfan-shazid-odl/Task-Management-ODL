@@ -88,6 +88,7 @@ tasksRouter.get(
         includeProject: include.includes('project'),
         includeReferenceDoc: include.includes('reference_doc'),
         withCount: q.count === true,
+        actor: req.user,
       }),
     );
   }),
@@ -121,6 +122,7 @@ tasksRouter.get(
         carryOver: q.carry_over === true,
         orderBy: q.order_by,
         order: q.order,
+        actor: req.user,
       }),
     );
   }),

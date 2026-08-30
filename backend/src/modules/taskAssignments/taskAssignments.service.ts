@@ -1,17 +1,35 @@
 import { prisma } from '../../config/prisma.js';
 import { serialize } from '../../utils/serialize.js';
 import { ApiError } from '../../utils/ApiError.js';
+import { visibleMemberIds, type Actor } from '../../utils/scope.js';
 
 interface ListFilter {
   taskIds?: string[];
   memberId?: string;
+  /** Authenticated caller; restricts results to their team (utils/scope.ts). */
+  actor?: Actor;
 }
 
 export async function list(filter: ListFilter) {
+  // Only ever return assignments for people the caller may see, so /reports
+  // can't surface another Lead's members through this endpoint.
+  const scopeIds = filter.actor ? await visibleMemberIds(filter.actor) : null;
+
+  // An explicit member_id must be intersected with the scope, not merged over
+  // it — asking for someone outside the caller's team yields nothing rather
+  // than silently widening the query.
+  let memberWhere: { member_id?: string | { in: string[] } } = {};
+  if (filter.memberId) {
+    if (scopeIds && !scopeIds.includes(filter.memberId)) return [];
+    memberWhere = { member_id: filter.memberId };
+  } else if (scopeIds) {
+    memberWhere = { member_id: { in: scopeIds } };
+  }
+
   const rows = await prisma.taskAssignment.findMany({
     where: {
       ...(filter.taskIds ? { task_id: { in: filter.taskIds } } : {}),
-      ...(filter.memberId ? { member_id: filter.memberId } : {}),
+      ...memberWhere,
     },
     orderBy: [{ task_id: 'asc' }, { member_id: 'asc' }],
   });

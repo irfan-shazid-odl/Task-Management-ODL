@@ -1,6 +1,7 @@
 import { prisma } from '../../config/prisma.js';
 import type { Prisma } from '@prisma/client';
 import { serialize } from '../../utils/serialize.js';
+import { visibleMemberIds, type Actor } from '../../utils/scope.js';
 
 interface ListFilter {
   taskIds?: string[];
@@ -8,12 +9,28 @@ interface ListFilter {
   logDateGte?: string;
   logDateLte?: string;
   includeTaskProject?: boolean;
+  /** Authenticated caller; restricts results to their team (utils/scope.ts). */
+  actor?: Actor;
 }
 
 export async function list(filter: ListFilter) {
+  // Hours booked by people outside the caller's team never come back, so a
+  // Lead's /reports totals only ever add up their own team's work.
+  const scopeIds = filter.actor ? await visibleMemberIds(filter.actor) : null;
+
+  // As in taskAssignments.list(): intersect an explicit member_id with the
+  // scope rather than letting it overwrite the restriction.
+  let memberWhere: { member_id?: string | { in: string[] } } = {};
+  if (filter.memberId) {
+    if (scopeIds && !scopeIds.includes(filter.memberId)) return [];
+    memberWhere = { member_id: filter.memberId };
+  } else if (scopeIds) {
+    memberWhere = { member_id: { in: scopeIds } };
+  }
+
   const where: Prisma.TimeLogWhereInput = {
     ...(filter.taskIds ? { task_id: { in: filter.taskIds } } : {}),
-    ...(filter.memberId ? { member_id: filter.memberId } : {}),
+    ...memberWhere,
     ...(filter.logDateGte || filter.logDateLte
       ? {
           log_date: {
