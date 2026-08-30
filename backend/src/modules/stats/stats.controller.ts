@@ -10,11 +10,11 @@ export async function getDashboardStats(req: Request, res: Response) {
   });
   const q = querySchema.parse(req.query);
 
-  const stats = await statsService.getDashboardStats(q.memberId, q.startDate, q.endDate);
+  const stats = await statsService.getDashboardStats(q.memberId, q.startDate, q.endDate, req.user);
   res.json(stats);
 }
 
 export async function getProjectsStats(req: Request, res: Response) {
-  const stats = await statsService.getProjectsStats();
+  const stats = await statsService.getProjectsStats(req.user);
   res.json(stats);
 }
