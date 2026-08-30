@@ -18,6 +18,11 @@ const nextConfig: NextConfig = {
         hostname: 'localhost',
         port: '4000',
       },
+      // Avatars/attachments streamed from the deployed Express backend.
+      {
+        protocol: 'https',
+        hostname: 'task-management-odl-backend-rho.vercel.app',
+      },
     ],
   },
 };
