@@ -21,6 +21,11 @@ import { useBoardReports } from './useBoardReports';
 
 export type ViewMode = 'mine' | 'all' | string;
 
+// Longest an unconfirmed optimistic status override may survive. Only a
+// backstop against a stuck entry; the normal path clears it as soon as a fetch
+// started after the write returns.
+const PENDING_STATUS_MAX_MS = 30_000;
+
 // Rows from one api.tasks.board() call, handed to enrichTasks instead of the
 // three separate requests it used to issue itself.
 interface BoardSources {
@@ -213,6 +218,46 @@ export function useBoardState() {
 
   const activitySigRef = useRef('');
 
+  // Optimistic status changes the server hasn't demonstrably caught up on yet.
+  //
+  // Dragging a card mutates local state immediately, but the 8s poll is often
+  // already in flight carrying pre-change data. Its response lands *after* the
+  // optimistic update and snaps the card back to its old column until the next
+  // poll — the "drop it, it bounces back, do it again and it sticks" problem.
+  // The fetch-sequence guard doesn't help: that only orders fetches against
+  // each other, not against local writes.
+  //
+  // So each drop records an override that is re-applied on top of every fetch
+  // result until a fetch that *started after* the write finished comes back —
+  // the first response guaranteed to contain it. createdAt is a safety valve so
+  // an entry can never stick forever (e.g. if someone else changes the task
+  // concurrently and the server legitimately never reports our value).
+  interface PendingStatus { status: TaskStatus; settledAt: number | null; createdAt: number }
+  const pendingStatusRef = useRef<Map<string, PendingStatus>>(new Map());
+
+  const applyPendingStatus = useCallback((list: Task[], fetchStartedAt: number): Task[] => {
+    const pending = pendingStatusRef.current;
+    if (pending.size === 0) return list;
+
+    const now = Date.now();
+    for (const [id, p] of pending) {
+      const serverHasCaughtUp = p.settledAt !== null && fetchStartedAt > p.settledAt;
+      if (serverHasCaughtUp || now - p.createdAt > PENDING_STATUS_MAX_MS) pending.delete(id);
+    }
+    if (pending.size === 0) return list;
+
+    // Applied before stabilizeTasks so the override is part of the task's
+    // signature: when it later clears and the server agrees, the signature is
+    // unchanged, object identity is reused, and nothing re-renders or flickers.
+    return list.map(t => {
+      const p = pending.get(t.id);
+      if (!p) return t;
+      return viewMode === 'all'
+        ? { ...t, status: p.status }
+        : { ...t, assignment_status: p.status } as Task;
+    });
+  }, [viewMode]);
+
   // Pure transform over rows already fetched by api.tasks.board(). All date
   // bucketing below still runs in the browser's timezone exactly as before —
   // only the network fetching moved out of this function.
@@ -319,6 +364,9 @@ export function useBoardState() {
     if (!currentUser) { setLoading(false); return; }
 
     const fetchSeq = ++fetchSeqRef.current;
+    // Captured before any request goes out: only a fetch that started after a
+    // write completed can be trusted to already reflect it.
+    const fetchStartedAt = Date.now();
 
     try {
       const baseParams: TaskListParams = {
@@ -359,7 +407,7 @@ export function useBoardState() {
         const bundle = await api.tasks.board(baseParams);
         if (fetchSeqRef.current !== fetchSeq) return;
         const enriched = (bundle.tasks.length ? enrichTasks(bundle.tasks, bundle) : []) as Task[];
-        startTransition(() => setTasks(stabilizeTasks(enriched)));
+        startTransition(() => setTasks(stabilizeTasks(applyPendingStatus(enriched, fetchStartedAt))));
         setLoading(false); setRefreshing(false); return;
       }
 
@@ -410,7 +458,7 @@ export function useBoardState() {
 
       if (fetchSeqRef.current !== fetchSeq) return;
       const enriched = (filteredTasks.length ? enrichTasks(filteredTasks, bundle) : []) as Task[];
-      startTransition(() => setTasks(stabilizeTasks(enriched)));
+      startTransition(() => setTasks(stabilizeTasks(applyPendingStatus(enriched, fetchStartedAt))));
     } catch {
       if (fetchSeqRef.current !== fetchSeq) return;
       setTasks([]);
@@ -418,7 +466,7 @@ export function useBoardState() {
     if (fetchSeqRef.current !== fetchSeq) return;
     setLoading(false);
     setRefreshing(false);
-  }, [currentUser, viewMode, boardDate, boardMonth, boardFilterMode, boardProjectId, enrichTasks, stabilizeTasks, setTasks, setLoading, setRefreshing]);
+  }, [currentUser, viewMode, boardDate, boardMonth, boardFilterMode, boardProjectId, enrichTasks, stabilizeTasks, applyPendingStatus, setTasks, setLoading, setRefreshing]);
 
   useEffect(() => {
     setLoading(true);
@@ -497,28 +545,54 @@ export function useBoardState() {
 
   const handleDropTask = useCallback(async (taskId: string, newStatus: TaskStatus) => {
     const shouldUpdateLogDate = newStatus === 'Complete';
+    const memberId = viewMode === 'mine' ? currentUser?.id : viewMode;
+    if (viewMode !== 'all' && !memberId) return;
 
-    if (viewMode === 'all') {
-      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: newStatus, ...(shouldUpdateLogDate ? { log_date: boardDate } : {}) } : t));
-      try {
+    // Hold the new column against any poll already in flight (see
+    // applyPendingStatus). Registered before the optimistic render so a
+    // response arriving mid-write still sees it.
+    pendingStatusRef.current.set(taskId, {
+      status: newStatus,
+      settledAt: null,
+      createdAt: Date.now(),
+    });
+
+    const settle = () => {
+      const p = pendingStatusRef.current.get(taskId);
+      if (p) p.settledAt = Date.now();
+      // Converge on server truth immediately rather than waiting out the poll;
+      // this fetch also clears the override once it returns.
+      fetchTasksRef.current();
+    };
+    const revert = () => {
+      pendingStatusRef.current.delete(taskId);
+      fetchTasksRef.current();
+    };
+
+    setTasks(prev => prev.map(t => t.id === taskId
+      ? {
+          ...t,
+          ...(viewMode === 'all' ? { status: newStatus } : { assignment_status: newStatus }),
+          ...(shouldUpdateLogDate ? { log_date: boardDate } : {}),
+        }
+      : t));
+
+    try {
+      if (viewMode === 'all') {
         const patch: Record<string, unknown> = { status: newStatus };
         if (shouldUpdateLogDate) patch.log_date = boardDate;
         await api.tasks.update(taskId, patch);
+      } else {
+        // Status first: it carries the permission checks (completed-with-logged-time,
+        // the Member lock), so a rejection leaves log_date untouched instead of
+        // half-applying the move.
+        await api.taskAssignments.updateStatus(taskId, memberId as string, newStatus);
+        if (shouldUpdateLogDate) await api.tasks.update(taskId, { log_date: boardDate });
       }
-      catch { fetchTasksRef.current(); }
-    } else {
-      const memberId = viewMode === 'mine' ? currentUser?.id : viewMode;
-      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, assignment_status: newStatus, ...(shouldUpdateLogDate ? { log_date: boardDate } : {}) } : t));
-      if (memberId) {
-        try {
-          if (shouldUpdateLogDate) await api.tasks.update(taskId, { log_date: boardDate });
-          await api.taskAssignments.updateStatus(taskId, memberId, newStatus);
-        }
-        catch (err: any) {
-          toast.error(err?.message || 'Failed to update status');
-          fetchTasksRef.current();
-        }
-      }
+      settle();
+    } catch (err: any) {
+      if (viewMode !== 'all') toast.error(err?.message || 'Failed to update status');
+      revert();
     }
   }, [currentUser, viewMode, boardDate]);
 
