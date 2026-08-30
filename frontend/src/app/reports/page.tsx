@@ -7,7 +7,7 @@ import { subscribeToChanges } from '@/lib/api';
 import { queryKeys } from '@/lib/query/queryKeys';
 import { useUser } from '@/components/UserContext';
 import { Skeleton } from '@/components/Skeleton';
-import { FileBarChart, Download } from 'lucide-react';
+import { FileBarChart, Download, FileSpreadsheet } from 'lucide-react';
 import { useProjects } from '@/hooks/queries/useProjects';
 import { useTasks, useUpdateTask } from '@/hooks/queries/useTasks';
 import { useTaskAssignments, useReplaceAssignees } from '@/hooks/queries/useTaskAssignments';
@@ -23,6 +23,10 @@ export default function ReportsPage() {
   const { loading: userLoading, currentUser } = useUser();
   const [search, setSearch] = useState('');
   const [downloading, setDownloading] = useState(false);
+  const [exportingSummary, setExportingSummary] = useState(false);
+  // Scoped to the report date banner + table only — "Save as Image" should
+  // capture the report itself, not the page chrome (heading, buttons, summary
+  // cards, filter inputs) around it.
   const reportRef = useRef<HTMLDivElement>(null);
 
   // One filter per column header — each defaults to "All" and narrows to an
@@ -236,6 +240,23 @@ export default function ReportsPage() {
     }
   };
 
+  // Exports exactly what the table is currently showing: `sorted` is the same
+  // filtered + sorted row set rendered below, so the date range and every
+  // column filter the lead has applied carry straight into the workbook.
+  const handleDownloadProjectSummary = async () => {
+    setExportingSummary(true);
+    try {
+      const { downloadProjectSummary } = await import('@/features/reports/lib/projectSummaryExcel');
+      await downloadProjectSummary({ rows: sorted, dateFrom, dateTo });
+      toast.success('Project summary downloaded');
+    } catch (err) {
+      console.error('Failed to export project summary:', err);
+      toast.error('Failed to export project summary');
+    } finally {
+      setExportingSummary(false);
+    }
+  };
+
   if (userLoading || loading) {
     return (
       <div className="min-h-screen bg-slate-50 p-6 lg:p-8">
@@ -266,35 +287,46 @@ export default function ReportsPage() {
               </p>
             </div>
           </div>
-          <button
-            onClick={handleDownloadImage}
-            disabled={downloading}
-            className="flex items-center gap-2 px-4 py-2.5 bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 shadow-sm"
-          >
-            <Download className="w-4 h-4" />
-            {downloading ? 'Saving...' : 'Save as Image'}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleDownloadProjectSummary}
+              disabled={exportingSummary}
+              className="flex items-center gap-2 px-4 py-2.5 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 text-sm font-medium rounded-lg transition-colors disabled:opacity-50 shadow-sm"
+              title="Download an Excel summary of every project in the selected date range"
+            >
+              <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+              {exportingSummary ? 'Preparing...' : 'Download Project Summary'}
+            </button>
+            <button
+              onClick={handleDownloadImage}
+              disabled={downloading}
+              className="flex items-center gap-2 px-4 py-2.5 bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 shadow-sm"
+            >
+              <Download className="w-4 h-4" />
+              {downloading ? 'Saving...' : 'Save as Image'}
+            </button>
+          </div>
         </div>
 
-        {/* Capturable report area */}
+        <ReportsSummaryCards
+          totalTasks={totalTasks}
+          totalProjects={totalProjects}
+          totalMembers={totalMembers}
+          totalLoggedTime={totalLoggedTime}
+        />
+
+        <ReportsFilters
+          search={search}
+          onSearchChange={setSearch}
+          dateFrom={dateFrom}
+          onDateFromChange={setDateFrom}
+          dateTo={dateTo}
+          onDateToChange={setDateTo}
+          todayStr={todayStr}
+        />
+
+        {/* Capturable report area — the date banner and the table only. */}
         <div ref={reportRef}>
-          <ReportsSummaryCards
-            totalTasks={totalTasks}
-            totalProjects={totalProjects}
-            totalMembers={totalMembers}
-            totalLoggedTime={totalLoggedTime}
-          />
-
-          <ReportsFilters
-            search={search}
-            onSearchChange={setSearch}
-            dateFrom={dateFrom}
-            onDateFromChange={setDateFrom}
-            dateTo={dateTo}
-            onDateToChange={setDateTo}
-            todayStr={todayStr}
-          />
-
           {/* Report Date banner — single day, or the full range when one is picked */}
           <div className="mb-4 bg-white border border-slate-200 rounded-xl py-2.5 text-center text-sm font-medium text-slate-600 shadow-sm">
             Report Date: {formatReportDateLabel(dateFrom, dateTo)}
