@@ -36,3 +36,19 @@ export const env = {
 // The system admin account is protected from deletion/pause/modification,
 // mirroring the original application behavior.
 export const SYSTEM_ADMIN_EMAIL = env.superAdminEmail;
+
+// CORS entries can be explicit origins ("https://app.example.com") or wildcard
+// subdomains ("*.vercel.app") so every deployment/preview URL of the frontend
+// is allowed without having to reconfigure the allowlist on each new preview.
+export function isCorsOriginAllowed(rawOrigin: string | undefined, corsOrigins: readonly string[]): boolean {
+  if (!rawOrigin) return false;
+  try {
+    const hostname = new URL(rawOrigin).hostname;
+    return corsOrigins.some((allowed) => {
+      if (allowed.startsWith('*')) return hostname.endsWith(allowed.slice(1));
+      return rawOrigin === allowed;
+    });
+  } catch {
+    return false;
+  }
+}

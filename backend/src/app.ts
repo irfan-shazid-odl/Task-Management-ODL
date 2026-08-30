@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
-import { env } from './config/env.js';
+import { env, isCorsOriginAllowed } from './config/env.js';
 import { apiRouter } from './routes/index.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 
@@ -13,7 +13,7 @@ export function createApp() {
   app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
   app.use(
     cors({
-      origin: env.corsOrigins,
+      origin: (origin, callback) => callback(null, isCorsOriginAllowed(origin ?? undefined, env.corsOrigins)),
       credentials: true,
     }),
   );
