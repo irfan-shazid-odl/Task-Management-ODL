@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { api, subscribeToChanges } from '@/lib/api';
 import { useUser } from '@/components/UserContext';
 import { Task, Project, TaskStatus, TaskPriority, ProjectDocument } from '@/lib/types';
+import { stabilizeRows, stabilizeRecord } from '@/lib/stabilize';
 import { toast } from 'sonner';
 import { useStore, useDispatch } from 'react-redux';
 import { RootState } from '@/store';
@@ -32,6 +33,26 @@ export function useAdminTasksState() {
   const [editingBillingHoursValue, setEditingBillingHoursValue] = useState('');
   const [editingHoursDate, setEditingHoursDate] = useState<string>(todayIsoDate());
   
+  // Reference stabilization for the 8s poll: reuse prior objects/arrays when
+  // nothing changed so the memoized AdminTaskTable doesn't re-render whole
+  // blocks on every tick (same technique the board uses in useBoardState).
+  const tasksIndexRef = useRef<{ current?: Map<string, { sig: string; row: any }>; last?: any[] }>({});
+  const projectsIndexRef = useRef<{ current?: Map<string, { sig: string; row: any }>; last?: any[] }>({});
+  const taskHoursIndexRef = useRef<{ current?: Record<string, number>; sig?: string }>({});
+  const taskSig = (t: any) => JSON.stringify([
+    t.id, t.project_id, t.description, t.status, t.priority, t.deadline,
+    t.reference_doc_id, t.category, t.estimated_time, t.log_date, t.created_at, t.updated_at,
+    t.project?.id ?? null, t.project?.name ?? null,
+    (t.assignee_ids || []).join(','),
+    t.reference_doc?.id ?? null, t.reference_doc?.title ?? null, t.reference_doc?.url ?? null,
+  ]);
+  const projectSig = (p: any) => JSON.stringify([
+    p.id, p.name, p.category, p.project_lead_id, p.client_id, p.client_name,
+    p.start_date, p.status, p.priority, p.project_type, p.sort_order,
+    p.client?.id ?? null, p.client?.name ?? null,
+    p.project_lead?.id ?? null, p.project_lead?.name ?? null,
+  ]);
+
   const [taskHours, setTaskHours] = useState<Record<string, number>>({});
   const [taskWorkingHours, setTaskWorkingHours] = useState<Record<string, number>>({});
   const [taskBillingHours, setTaskBillingHours] = useState<Record<string, number>>({});
@@ -98,7 +119,7 @@ export function useAdminTasksState() {
         api.projects.list({ include: 'client', orderBy: 'created_at', order: 'desc' }),
         api.tasks.listWithCount({ include: 'project', order_by: 'created_at', order: 'desc', limit: PAGE_SIZE, offset: from }),
       ]);
-      setProjects((projectsData || []) as any);
+      setProjects(stabilizeRows((projectsData || []) as any, projectsIndexRef.current, projectSig));
       setTotalTasks(tasksRes.count ?? 0);
       const tasksData = tasksRes.data;
       if (tasksData) {
@@ -112,7 +133,7 @@ export function useAdminTasksState() {
         const refDocMap = new Map<string, any>();
         if (refDocIds.length > 0) { const refDocs = await api.documents.listByIds(refDocIds as string[]); (refDocs || []).forEach((d: any) => refDocMap.set(d.id, d)); }
         const enrichedWithDocs = enriched.map((t: any) => ({ ...t, reference_doc: t.reference_doc_id ? (refDocMap.get(t.reference_doc_id) || null) : null }));
-        setTasks(enrichedWithDocs);
+        setTasks(stabilizeRows(enrichedWithDocs as any, tasksIndexRef.current, taskSig));
 
         if (taskIds.length > 0) {
           const logsData = await api.timeLogs.list({ taskIds });
@@ -122,9 +143,9 @@ export function useAdminTasksState() {
             workingHoursMap[log.task_id] = (workingHoursMap[log.task_id] || 0) + Number(log.hours_logged || 0);
             billingHoursMap[log.task_id] = (billingHoursMap[log.task_id] || 0) + Number(log.billing_hours || 0);
           });
-          setTaskHours(workingHoursMap);
-          setTaskWorkingHours(workingHoursMap);
-          setTaskBillingHours(billingHoursMap);
+          setTaskHours(stabilizeRecord(workingHoursMap, taskHoursIndexRef.current));
+          setTaskWorkingHours(stabilizeRecord(workingHoursMap, taskHoursIndexRef.current));
+          setTaskBillingHours(stabilizeRecord(billingHoursMap, taskHoursIndexRef.current));
         }
       }
     } catch { /* Backend not reachable */ }

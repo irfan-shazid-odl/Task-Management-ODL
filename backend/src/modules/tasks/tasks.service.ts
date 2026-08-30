@@ -82,7 +82,11 @@ export async function list(f: TaskListFilter) {
   };
 
   if (f.withCount) {
-    const [rows, count] = await prisma.$transaction([
+    // Both reads are read-only; run them concurrently instead of wrapping the
+    // pair in a serial transaction (which adds BEGIN/COMMIT round trips, holds
+    // a pooled connection for both queries, and executes them one after the
+    // other). Same result, roughly half the latency on the hot 8s poll path.
+    const [rows, count] = await Promise.all([
       prisma.task.findMany(query),
       prisma.task.count({ where }),
     ]);

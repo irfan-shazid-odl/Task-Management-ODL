@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { memo } from 'react';
 import Link from 'next/link';
 import { Project } from '@/lib/types';
 import { Layers, ExternalLink, GripVertical, ChevronDown, Check, Clock, Edit, X, Trash2 } from 'lucide-react';
@@ -62,7 +62,29 @@ interface ProjectTableProps {
   onOpenDelete: (p: Project) => void;
 }
 
-export default function ProjectTable({
+// The projects page polls every ~8s and defines most handlers inline, so they
+// get a new identity on every poll. Compare only the data props (which the page
+// reference-stabilizes via stabilizeRows/stabilizeRecord and useMemo) and
+// ignore the callbacks: any change that would make a stale closure incorrect
+// (a different project, an editing state, the hours map, an active drag) is
+// already a data change the comparator checks, forcing a re-render and fresh
+// closures. Same pattern as ReportsTable/BoardHeader.
+const projectTablePropsEqual = (prev: ProjectTableProps, next: ProjectTableProps) =>
+  prev.projects === next.projects &&
+  prev.search === next.search &&
+  prev.sortBy === next.sortBy &&
+  prev.sortDir === next.sortDir &&
+  prev.isSuperAdminOrLead === next.isSuperAdminOrLead &&
+  prev.projectHours === next.projectHours &&
+  prev.draggedId === next.draggedId &&
+  prev.canEditStatus === next.canEditStatus &&
+  prev.editingStatusId === next.editingStatusId &&
+  prev.canEditHours === next.canEditHours &&
+  prev.editingHoursId === next.editingHoursId &&
+  prev.editingMetric === next.editingMetric &&
+  prev.editingHoursValue === next.editingHoursValue;
+
+function ProjectTable({
   projects, search, sortBy, sortDir, isSuperAdminOrLead,
   projectHours, draggedId, onDragStart, onDragOver, onDrop,
   canEditStatus, editingStatusId, setEditingStatusId, onSaveProjectStatus,
@@ -302,3 +324,5 @@ export default function ProjectTable({
     </div>
   );
 }
+
+export default memo(ProjectTable, projectTablePropsEqual);

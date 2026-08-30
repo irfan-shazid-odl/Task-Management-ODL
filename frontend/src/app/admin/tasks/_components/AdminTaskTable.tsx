@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { memo } from 'react';
 import { useRouter } from 'next/navigation';
 import { Task } from '@/lib/types';
 import { StatusBadge, PriorityBadge } from '@/components/StatusBadge';
@@ -51,7 +51,31 @@ interface AdminTaskTableProps {
   taskBillingHours: Record<string, number>;
 }
 
-export default function AdminTaskTable({
+// The Admin page polls every 8s and defines all its handlers inline, so every
+// poll gives them a new identity whether or not the data changed. Compare only
+// the data props — the page's own state that drives what this table renders —
+// and ignore the callbacks entirely: any change that would make a stale closure
+// incorrect (a different task, an editing value, the hours maps) is already a
+// data change the comparator *does* check, which forces a re-render and
+// recaptures fresh closures. Same pattern as ReportsTable/BoardHeader.
+const adminTaskTablePropsEqual = (prev: AdminTaskTableProps, next: AdminTaskTableProps) =>
+  prev.tasks === next.tasks &&
+  prev.teamMembers === next.teamMembers &&
+  prev.canEditHours === next.canEditHours &&
+  prev.totalTasks === next.totalTasks &&
+  prev.page === next.page &&
+  prev.pageSize === next.pageSize &&
+  prev.totalPages === next.totalPages &&
+  prev.loading === next.loading &&
+  prev.editingWorkingHoursTaskId === next.editingWorkingHoursTaskId &&
+  prev.editingWorkingHoursValue === next.editingWorkingHoursValue &&
+  prev.editingBillingHoursTaskId === next.editingBillingHoursTaskId &&
+  prev.editingBillingHoursValue === next.editingBillingHoursValue &&
+  prev.editingHoursDate === next.editingHoursDate &&
+  prev.taskWorkingHours === next.taskWorkingHours &&
+  prev.taskBillingHours === next.taskBillingHours;
+
+function AdminTaskTable({
   tasks,
   teamMembers,
   canEditHours,
@@ -297,3 +321,5 @@ export default function AdminTaskTable({
     </div>
   );
 }
+
+export default memo(AdminTaskTable, adminTaskTablePropsEqual);

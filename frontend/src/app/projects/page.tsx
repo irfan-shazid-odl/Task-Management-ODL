@@ -1,11 +1,12 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { api, subscribeToChanges } from '@/lib/api';
 import { useUser } from '@/components/UserContext';
 import { Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { Project } from '@/lib/types';
+import { stabilizeRows, stabilizeRecord } from '@/lib/stabilize';
 import ProjectModal from '@/components/ProjectModal';
 import DeleteConfirmModal from '@/components/DeleteConfirmModal';
 import { Skeleton } from '@/components/Skeleton';
@@ -43,6 +44,18 @@ export default function ProjectsPage() {
   const [editingStatusId, setEditingStatusId] = useState<string | null>(null);
   const canEditStatus = currentUser?.role !== 'Member';
 
+  // Reference stabilization for the 8s poll: reuse prior objects/arrays when
+  // nothing changed so the memoized ProjectTable doesn't re-render whole
+  // blocks on every tick (same technique the board uses in useBoardState).
+  const projectsIndexRef = useRef<{ current?: Map<string, { sig: string; row: Project }>; last?: Project[] }>({});
+  const projectHoursIndexRef = useRef<{ current?: Record<string, { working: number; billing: number }>; sig?: string }>({});
+  const projectSig = (p: any) => JSON.stringify([
+    p.id, p.name, p.category, p.project_lead_id, p.client_id, p.client_name,
+    p.start_date, p.status, p.priority, p.project_type, p.sort_order,
+    p.client?.id ?? null, p.client?.name ?? null,
+    p.project_lead?.id ?? null, p.project_lead?.name ?? null,
+  ]);
+
   // ── Fetch ──────────────────────────────────────────────────────────────────
   const fetchData = useCallback(async (isSilent = false) => {
     if (!isSilent) setLoading(true);
@@ -64,8 +77,8 @@ export default function ProjectsPage() {
           filteredProjects = [];
         }
       }
-      setProjects(filteredProjects as any);
-      setProjectHours(statsData);
+      setProjects(stabilizeRows(filteredProjects as Project[], projectsIndexRef.current, projectSig) as any);
+      setProjectHours(stabilizeRecord(statsData as Record<string, { working: number; billing: number }>, projectHoursIndexRef.current));
     } catch (error: any) {
       toast.error('Failed to load data: ' + error.message);
     } finally {
@@ -195,20 +208,24 @@ export default function ProjectsPage() {
     }
   };
 
-  const filteredProjects = projects
-    .filter(p =>
-      (statusFilter === 'All' || p.status === statusFilter) &&
-      (categoryFilter === 'All' || p.category === categoryFilter) &&
-      (p.name.toLowerCase().includes(search.toLowerCase()) ||
-      (p as any).client?.name?.toLowerCase().includes(search.toLowerCase()))
-    )
-    .sort((a, b) => {
-      let comparison = 0;
-      if (sortBy === 'custom') comparison = (a.sort_order || 0) - (b.sort_order || 0);
-      else if (sortBy === 'name') comparison = a.name.localeCompare(b.name);
-      else if (sortBy === 'date') comparison = (a.start_date || '').localeCompare(b.start_date || '');
-      return sortDir === 'asc' ? comparison : -comparison;
-    });
+  const filteredProjects = useMemo(
+    () =>
+      projects
+        .filter(p =>
+          (statusFilter === 'All' || p.status === statusFilter) &&
+          (categoryFilter === 'All' || p.category === categoryFilter) &&
+          (p.name.toLowerCase().includes(search.toLowerCase()) ||
+          (p as any).client?.name?.toLowerCase().includes(search.toLowerCase()))
+        )
+        .sort((a, b) => {
+          let comparison = 0;
+          if (sortBy === 'custom') comparison = (a.sort_order || 0) - (b.sort_order || 0);
+          else if (sortBy === 'name') comparison = a.name.localeCompare(b.name);
+          else if (sortBy === 'date') comparison = (a.start_date || '').localeCompare(b.start_date || '');
+          return sortDir === 'asc' ? comparison : -comparison;
+        }),
+    [projects, search, statusFilter, categoryFilter, sortBy, sortDir],
+  );
 
   const isSuperAdminOrLead = currentUser?.role !== 'Member';
   const colSpan = isSuperAdminOrLead ? 10 : 8;

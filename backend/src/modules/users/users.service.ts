@@ -5,7 +5,29 @@ import { hashPassword } from '../../utils/password.js';
 import { toPublicMember, toPublicMembers } from './users.mapper.js';
 
 export async function listMembers() {
-  const members = await prisma.teamMember.findMany({ orderBy: { name: 'asc' } });
+  // Fetch only the public columns — never the bcrypt password_hash — which the
+  // mapper was already stripping in memory after the row was read. This avoids
+  // transferring the hash from the database on every session start, when this
+  // endpoint is fired app-wide for every logged-in user. Response shape is
+  // unchanged: the exact same fields toPublicMember() would have returned.
+  const members = await prisma.teamMember.findMany({
+    orderBy: { name: 'asc' },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      role: true,
+      is_first_login: true,
+      phone: true,
+      location: true,
+      department: true,
+      bio: true,
+      avatar_url: true,
+      is_paused: true,
+      created_at: true,
+      managed_by_id: true,
+    },
+  });
   return toPublicMembers(members);
 }
 

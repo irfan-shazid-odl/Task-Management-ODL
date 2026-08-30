@@ -372,27 +372,6 @@ export function useProjectState() {
 
   useEffect(() => {
     if (userLoading) return;
-
-    const fetchLatestActivities = async () => {
-      try {
-        const actData = await api.activity.list({ projectId, limit: 5 });
-        setActivities((actData || []).map((a: any) => ({
-          description: a.description,
-          action_type: a.action_type,
-          created_at: a.created_at,
-          member: { name: a.member?.name || 'Unknown' }
-        })));
-      } catch {
-        /* ignore */
-      }
-    };
-    const unsub = subscribeToChanges(fetchLatestActivities);
-
-    return () => { unsub(); };
-  }, [userLoading, projectId]);
-
-  useEffect(() => {
-    if (userLoading) return;
     const unsub = subscribeToChanges(() => { fetchData(); });
     return () => { unsub(); };
   }, [userLoading, projectId, fetchData]);

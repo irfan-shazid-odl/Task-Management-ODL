@@ -60,6 +60,16 @@ export default function DashboardPage() {
   // response must not overwrite the newer one.
   const fetchSeqRef = useRef(0);
 
+  // Content signatures for the array state that feeds the memoized dashboard
+  // children. The 8s poll returns fresh objects each time even when nothing
+  // changed; if the serialized contents are unchanged we skip setState so the
+  // memoized children keep the previous (identical) references and bail out of
+  // re-rendering.
+  const statusCountsSigRef = useRef('');
+  const projectHoursSigRef = useRef('');
+  const recentTasksSigRef = useRef('');
+  const recentActivitySigRef = useRef('');
+
   const fetchDashboardData = useCallback(async (isBackground = false) => {
     const fetchSeq = ++fetchSeqRef.current;
     if (!isBackground) {
@@ -111,28 +121,49 @@ export default function DashboardPage() {
       if (fetchSeqRef.current !== fetchSeq) return;
 
       setTotalActive(statsData.totalActiveTasks);
-      setStatusCounts(statsData.statusCounts as any);
+      const nextStatusCounts = statsData.statusCounts as StatusCount[];
+      const statusSig = JSON.stringify(nextStatusCounts);
+      if (statusSig !== statusCountsSigRef.current) {
+        statusCountsSigRef.current = statusSig;
+        setStatusCounts(nextStatusCounts);
+      }
       setHoursToday(statsData.totalWorkingHours);
       setTotalWorkingHours(statsData.totalWorkingHours);
       setTotalBillingHours(statsData.totalBillingHours);
       setTotalProjects(statsData.totalProjects);
       setTotalMembers(statsData.totalMembers);
-      setProjectHours(statsData.projectHours as any);
 
-      setRecentTasks(recentData ? recentData.map(t => ({
+      const nextProjectHours = statsData.projectHours as Array<{ id: string; name: string; category: string; hours: number }>;
+      const projectHoursSig = JSON.stringify(nextProjectHours);
+      if (projectHoursSig !== projectHoursSigRef.current) {
+        projectHoursSigRef.current = projectHoursSig;
+        setProjectHours(nextProjectHours);
+      }
+
+      const nextRecentTasks = recentData ? recentData.map(t => ({
         description: t.description,
         status: t.status as TaskStatus,
         priority: t.priority,
         project: t.project as unknown as { id: string; name: string }
-      })) : []);
+      })) : [];
+      const recentTasksSig = JSON.stringify(nextRecentTasks);
+      if (recentTasksSig !== recentTasksSigRef.current) {
+        recentTasksSigRef.current = recentTasksSig;
+        setRecentTasks(nextRecentTasks);
+      }
 
-      setRecentActivity(actAll ? actAll.map((a: Record<string, any>) => ({
+      const nextRecentActivity = actAll ? actAll.map((a: Record<string, any>) => ({
         description: a.description,
         action_type: a.action_type,
         created_at: a.created_at,
         member: { name: a.member?.name || 'Unknown' },
         project_name: a.project?.name
-      })) : []);
+      })) : [];
+      const recentActivitySig = JSON.stringify(nextRecentActivity);
+      if (recentActivitySig !== recentActivitySigRef.current) {
+        recentActivitySigRef.current = recentActivitySig;
+        setRecentActivity(nextRecentActivity);
+      }
 
     } catch {
       // Backend not reachable

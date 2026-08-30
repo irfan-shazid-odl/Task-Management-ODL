@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { memo, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ExternalLink, ChevronDown, ArrowUp, ArrowDown, Loader2, Search, Check } from 'lucide-react';
 import { TASK_STATUSES, TASK_CATEGORIES } from '@/lib/types';
@@ -358,7 +358,31 @@ function FilterHeader({
   );
 }
 
-export default function ReportsTable({
+// ReportsPage re-renders every 8s (its live-refresh poll invalidates the
+// underlying queries) and defines its seven handlers inline, so they get a
+// new identity on every render whether or not the report actually changed.
+// Comparing only the data props — exactly ReportsPage's own useMemo
+// dependency set, so this is never stale for longer than a real change is
+// already visible in `rows` — keeps ReportsTable (and every row's own
+// dropdown/inline-edit state) from re-rendering when nothing in the report
+// did. Same rationale as BoardHeader's comparator on the board page.
+const reportsTablePropsEqual = (prev: Props, next: Props) =>
+  prev.rows === next.rows &&
+  prev.totalLoggedTime === next.totalLoggedTime &&
+  prev.sortKey === next.sortKey &&
+  prev.sortDir === next.sortDir &&
+  prev.clientOptions === next.clientOptions &&
+  prev.projectOptions === next.projectOptions &&
+  prev.assigneeOptions === next.assigneeOptions &&
+  prev.clientFilter === next.clientFilter &&
+  prev.projectFilter === next.projectFilter &&
+  prev.assigneeFilter === next.assigneeFilter &&
+  prev.statusFilter === next.statusFilter &&
+  prev.categoryFilter === next.categoryFilter &&
+  prev.assignableMembers === next.assignableMembers &&
+  prev.savingTaskId === next.savingTaskId;
+
+function ReportsTable({
   rows, totalLoggedTime, sortKey, sortDir, onSort,
   clientOptions, projectOptions, assigneeOptions,
   clientFilter, projectFilter, assigneeFilter, statusFilter, categoryFilter,
@@ -499,3 +523,5 @@ export default function ReportsTable({
     </div>
   );
 }
+
+export default memo(ReportsTable, reportsTablePropsEqual);

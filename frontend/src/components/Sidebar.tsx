@@ -48,9 +48,17 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
 
     fetchExpiring();
 
-    const unsub = subscribeToChanges(() => {
-      fetchExpiring();
-    });
+    // The "expiring subscriptions" badge doesn't need 8s freshness (and this
+    // is a perpetual, session-long poll for every Admin/super-admin regardless
+    // of which page they're on). Poll at 60s instead of the default 8s. The
+    // badge still catches up immediately on mount and when the tab regains
+    // focus, so what's displayed is unchanged — just fetched ~7x less often.
+    const unsub = subscribeToChanges(
+      () => {
+        fetchExpiring();
+      },
+      { intervalMs: 60_000 },
+    );
 
     return () => {
       unsub();

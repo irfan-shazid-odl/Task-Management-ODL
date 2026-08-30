@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useCallback, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useEffect, useCallback, useMemo, useState, ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api, getToken } from '@/lib/api';
 import { TeamMember } from '@/lib/types';
@@ -86,6 +86,11 @@ export function UserProvider({ children }: { children: ReactNode }) {
     [dispatch],
   );
 
+  const setShowPasswordModalVisible = useCallback(
+    (v: boolean) => dispatch(setShowPasswordModal(v)),
+    [dispatch],
+  );
+
   const setTeamMembers = useCallback(
     (updater: TeamMember[] | ((prev: TeamMember[]) => TeamMember[])) => {
       qc.setQueryData<TeamMember[]>(queryKeys.users.all, (old = []) =>
@@ -122,12 +127,21 @@ export function UserProvider({ children }: { children: ReactNode }) {
     setChangingPass(false);
   };
 
-  return (
-    <UserContext.Provider value={{
+  // Memoize the context value: consumers of useUser() re-render whenever this
+  // object's identity changes, so building it fresh on every render (and with a
+  // new setShowPasswordModal closure) would re-render the whole authenticated
+  // tree on each unrelated render of this provider.
+  const value = useMemo<UserContextType>(
+    () => ({
       currentUser, setCurrentUser, teamMembers, setTeamMembers,
       loading, logout, refreshUser: loadSession,
-      showPasswordModal, setShowPasswordModal: (v) => dispatch(setShowPasswordModal(v)),
-    }}>
+      showPasswordModal, setShowPasswordModal: setShowPasswordModalVisible,
+    }),
+    [currentUser, setCurrentUser, teamMembers, setTeamMembers, loading, logout, loadSession, showPasswordModal, setShowPasswordModalVisible],
+  );
+
+  return (
+    <UserContext.Provider value={value}>
       {children}
 
       {/* Non-Blocking Password Change Notification */}

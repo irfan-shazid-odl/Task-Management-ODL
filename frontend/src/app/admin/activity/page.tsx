@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { History, Search, ArrowLeft, Shield } from 'lucide-react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
@@ -20,6 +20,15 @@ export default function ActivityHistoryPage() {
   const [projectId, setProjectId] = useState(initialProject || '');
   const [page, setPage] = useState(1);
 
+  // The raw search box stays fully controlled (immediate feedback), but the
+  // actual full-array filter below keys off this debounced copy so typing
+  // doesn't re-scan every activity row on every keystroke.
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 200);
+    return () => clearTimeout(t);
+  }, [search]);
+
   const { data: allActivities = [], isLoading } = useActivity(
     projectId ? { projectId } : {},
     !userLoading,
@@ -28,10 +37,16 @@ export default function ActivityHistoryPage() {
 
   // Filter BEFORE paginating: the API returns every row, so searching across
   // only the current page slice would never surface matches on later pages.
-  const allFiltered = allActivities.filter((a) =>
-    a.description.toLowerCase().includes(search.toLowerCase()) ||
-    (a.member?.name || '').toLowerCase().includes(search.toLowerCase()),
-  );
+  // Memoized so the array only rescanned when its inputs actually change
+  // (not on pagination clicks, not on every 8s poll that returns the same rows).
+  const allFiltered = useMemo(() => {
+    const q = debouncedSearch.toLowerCase();
+    if (!q) return allActivities;
+    return allActivities.filter((a) =>
+      a.description.toLowerCase().includes(q) ||
+      (a.member?.name || '').toLowerCase().includes(q),
+    );
+  }, [allActivities, debouncedSearch]);
 
   const totalFiltered = allFiltered.length;
 

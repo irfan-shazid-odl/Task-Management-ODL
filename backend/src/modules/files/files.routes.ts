@@ -34,14 +34,35 @@ filesRouter.post(
 );
 
 // Stream a stored file. optionalAuth so <img src> can load it without headers.
+//
+// A file's bytes are permanently tied to its id — storeFile() only ever
+// inserts a new row (a re-uploaded avatar gets a new id; nothing calls
+// fileAsset.update() on `data`), so the id itself is a valid, stable ETag with
+// no hashing needed. That makes the response cacheable forever rather than
+// the old 1-hour window, which matters once the same handful of avatars are
+// being requested by every board card, task list, and sidebar across possibly
+// hundreds of concurrent sessions.
+//
+// The ETag check runs before touching the database: if the client already has
+// this id cached, the answer is unconditionally "yes, that's still it" with
+// zero query and zero bytes sent — for repeat/expired-cache visits (the
+// common case at any real concurrency) this skips a bytea round trip to a
+// remote database entirely.
 filesRouter.get(
   '/:id',
   optionalAuth,
   asyncHandler(async (req, res) => {
+    const etag = `"${req.params.id}"`;
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    res.setHeader('ETag', etag);
+    if (req.headers['if-none-match'] === etag) {
+      res.status(304).end();
+      return;
+    }
+
     const asset = await service.getFile(req.params.id);
     res.setHeader('Content-Type', asset.mime_type);
     res.setHeader('Content-Length', String(asset.size_bytes));
-    res.setHeader('Cache-Control', 'private, max-age=3600');
     res.send(Buffer.from(asset.data));
   }),
 );

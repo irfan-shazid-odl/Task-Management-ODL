@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { toPng } from 'html-to-image';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
 import { subscribeToChanges } from '@/lib/api';
@@ -218,6 +217,9 @@ export default function ReportsPage() {
     if (!reportRef.current) return;
     setDownloading(true);
     try {
+      // Load the rasterizer only when the user actually clicks Save — it's a
+      // sizable library that otherwise bloats this page's bundle for everyone.
+      const { toPng } = await import('html-to-image');
       const dataUrl = await toPng(reportRef.current, {
         backgroundColor: '#f8fafc',
         pixelRatio: 2,
