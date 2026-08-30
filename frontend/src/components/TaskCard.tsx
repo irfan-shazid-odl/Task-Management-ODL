@@ -57,7 +57,6 @@ const TaskCardComponent = ({ task, onStatusChange, onHoursLogged, onDropTask, on
   const latestLogIdRef = useRef<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  // Delete confirmation (own tasks only — enforced again on the backend)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeletingTask, setIsDeletingTask] = useState(false);
   const isOwnTask = React.useMemo(
@@ -133,9 +132,33 @@ const TaskCardComponent = ({ task, onStatusChange, onHoursLogged, onDropTask, on
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
+  // A Complete task with booked time is frozen — the hours are on the record
+  // against that status, so it must not shift underneath them. The backend
+  // enforces this too; disabling here just avoids offering an action that
+  // would only come back as an error toast.
+  //
+  // Prefer the server's has_logged_time: total_logged_hours is scoped to the
+  // board's current day/month window, so it reads 0 for a task completed in an
+  // earlier period that does have logged time. Fall back to the visible totals
+  // where the flag isn't supplied (e.g. the daily page).
+  const hasLoggedTime =
+    task.has_logged_time ??
+    ((task.total_logged_hours ?? 0) > 0 || (task.total_billing_hours ?? 0) > 0);
+  const isLockedComplete = displayStatus === 'Complete' && !!hasLoggedTime;
+
+  // Mirrors deleteTask() on the server, so the button is offered exactly when
+  // the request would succeed. Deliberately has no notion of task age: a task
+  // stays deletable however old it is. The only bar is a completed task whose
+  // hours are already booked — deleting that would take the logged time with
+  // it. Members are additionally limited to tasks they're assigned to; Leads,
+  // Admins and super-admin may delete any task, which the old assignee-only
+  // check wrongly hid from them.
+  const canDeleteTask =
+    (currentUser?.role !== 'Member' || !!isOwnTask) && !isLockedComplete;
+
   const currentIndex = TASK_STATUSES.indexOf(displayStatus);
-  const canMoveForward = currentIndex < TASK_STATUSES.length - 1;
-  const canMoveBackward = currentIndex > 0;
+  const canMoveForward = currentIndex < TASK_STATUSES.length - 1 && !isLockedComplete;
+  const canMoveBackward = currentIndex > 0 && !isLockedComplete;
 
   async function moveTask(direction: 'forward' | 'backward') {
     const newIndex = direction === 'forward' ? currentIndex + 1 : currentIndex - 1;
@@ -446,7 +469,7 @@ const TaskCardComponent = ({ task, onStatusChange, onHoursLogged, onDropTask, on
 
   return (
     <>
-      <TaskCardDetails task={task} currentUser={currentUser} descExpanded={descExpanded} setDescExpanded={setDescExpanded} avatarModal={avatarModal} setAvatarModal={setAvatarModal} displayedLogDate={displayedLogDate} logDateEditable={logDateEditable} setLogDateEditable={setLogDateEditable} logDate={logDate} setLogDate={setLogDate} logging={logging} logHours={logHours} hours={hours} setHours={setHours} billingHours={billingHours} setBillingHours={setBillingHours} canMoveBackward={canMoveBackward} canMoveForward={canMoveForward} moving={moving} moveTask={moveTask} currentIndex={currentIndex} openEdit={openEdit} taskStoredLogDate={taskStoredLogDate} logDateOnEditStartRef={logDateOnEditStartRef} commitLogDateOnly={commitLogDateOnly} isLongDesc={isLongDesc} DESC_LIMIT={DESC_LIMIT} displayStatus={displayStatus} getTaskAge={getTaskAge} deadlineDate={deadlineDate} isOverdue={isOverdue} showMoveButtons={showMoveButtons} canDelete={!!isOwnTask} onRequestDelete={() => setShowDeleteConfirm(true)} />
+      <TaskCardDetails task={task} currentUser={currentUser} descExpanded={descExpanded} setDescExpanded={setDescExpanded} avatarModal={avatarModal} setAvatarModal={setAvatarModal} displayedLogDate={displayedLogDate} logDateEditable={logDateEditable} setLogDateEditable={setLogDateEditable} logDate={logDate} setLogDate={setLogDate} logging={logging} logHours={logHours} hours={hours} setHours={setHours} billingHours={billingHours} setBillingHours={setBillingHours} canMoveBackward={canMoveBackward} canMoveForward={canMoveForward} moving={moving} moveTask={moveTask} currentIndex={currentIndex} openEdit={openEdit} taskStoredLogDate={taskStoredLogDate} logDateOnEditStartRef={logDateOnEditStartRef} commitLogDateOnly={commitLogDateOnly} isLongDesc={isLongDesc} DESC_LIMIT={DESC_LIMIT} displayStatus={displayStatus} getTaskAge={getTaskAge} deadlineDate={deadlineDate} isOverdue={isOverdue} showMoveButtons={showMoveButtons} canDelete={canDeleteTask} onRequestDelete={() => setShowDeleteConfirm(true)} isLockedComplete={isLockedComplete} />
       <TaskEditModal showEditModal={showEditModal} setShowEditModal={setShowEditModal} editDescription={editDescription} setEditDescription={setEditDescription} editStatus={editStatus} setEditStatus={setEditStatus} editPriority={editPriority} setEditPriority={setEditPriority} editDeadline={editDeadline} setEditDeadline={setEditDeadline} editProjectId={editProjectId} setEditProjectId={setEditProjectId} editRefDocId={editRefDocId} setEditRefDocId={setEditRefDocId} editHours={editHours} setEditHours={setEditHours} editBillingHours={editBillingHours} setEditBillingHours={setEditBillingHours} editLogDate={editLogDate} setEditLogDate={setEditLogDate} editAssigneeIds={editAssigneeIds} setEditAssigneeIds={setEditAssigneeIds} assigneeSearch={assigneeSearch} setAssigneeSearch={setAssigneeSearch} projDropdownOpen={projDropdownOpen} setProjDropdownOpen={setProjDropdownOpen} docDropdownOpen={docDropdownOpen} setDocDropdownOpen={setDocDropdownOpen} projSearch={projSearch} setProjSearch={setProjSearch} docSearch={docSearch} setDocSearch={setDocSearch} projRect={projRect} setProjRect={setProjRect} docRect={docRect} setDocRect={setDocRect} projTriggerRef={projTriggerRef} docTriggerRef={docTriggerRef} projDropdownRef={projDropdownRef} docDropdownRef={docDropdownRef} availableProjects={availableProjects} editProjectDocs={editProjectDocs} loadingDocs={loadingDocs} teamMembers={teamMembers} canManageAssignees={canManageAssignees} saving={saving} saveEdit={saveEdit} />
       {/* ?????? Avatar Modal ????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????? */}
       {avatarModal && (

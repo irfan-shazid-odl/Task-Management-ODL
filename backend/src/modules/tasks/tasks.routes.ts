@@ -93,6 +93,39 @@ tasksRouter.get(
   }),
 );
 
+// Batched board payload — one request replacing the board's old five-request,
+// three-wave fetch. Takes the same filters as GET /tasks plus member_id.
+// Declared before '/:id' routes so 'board' is never parsed as a task id.
+const boardQuery = listQuery.extend({
+  member_id: z.string().uuid().optional(),
+});
+
+tasksRouter.get(
+  '/board',
+  validate({ query: boardQuery }),
+  asyncHandler(async (req, res) => {
+    const q = req.query as unknown as z.infer<typeof boardQuery>;
+    res.json(
+      await service.boardBundle({
+        memberId: q.member_id,
+        projectId: q.project_id,
+        ids: csv(q.ids),
+        status: csv(q.status),
+        logDate: q.log_date,
+        logDateLt: q.log_date_lt,
+        logDateLte: q.log_date_lte,
+        logDateGte: q.log_date_gte,
+        createdFrom: q.created_from,
+        createdTo: q.created_to,
+        boardDate: q.board_date,
+        carryOver: q.carry_over === true,
+        orderBy: q.order_by,
+        order: q.order,
+      }),
+    );
+  }),
+);
+
 tasksRouter.post(
   '/',
   validate({ body: createBody }),

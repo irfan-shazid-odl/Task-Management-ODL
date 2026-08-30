@@ -55,9 +55,31 @@ function toQuery(p: TaskListParams): Record<string, string | number | boolean | 
   };
 }
 
+// Raw materials for one board render, fetched in a single round trip.
+// Every date field is returned untouched so the caller keeps doing its own
+// local-timezone bucketing — see boardBundle() on the server.
+export interface BoardBundle {
+  tasks: Task[];
+  /** The focused member's own assignments (empty on the "all members" board). */
+  memberAssignments: { task_id: string; member_id: string; status: string }[];
+  /** Every assignee of every returned task, for avatars. */
+  assignments: { task_id: string; member_id: string; status: string }[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  timeLogs: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  documents: any[];
+}
+
 export const tasksApi = {
   list(params: TaskListParams = {}): Promise<Task[]> {
     return apiFetch<Task[]>('/tasks', { query: toQuery(params) });
+  },
+
+  // Single-request replacement for the board's old five-request fetch.
+  board(params: TaskListParams & { member_id?: string } = {}): Promise<BoardBundle> {
+    return apiFetch<BoardBundle>('/tasks/board', {
+      query: { ...toQuery(params), member_id: params.member_id },
+    });
   },
 
   // Paginated variant: returns { data, count }.

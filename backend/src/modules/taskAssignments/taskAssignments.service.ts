@@ -1,7 +1,6 @@
 import { prisma } from '../../config/prisma.js';
 import { serialize } from '../../utils/serialize.js';
 import { ApiError } from '../../utils/ApiError.js';
-import { hasLoggedTimeForMember } from '../tasks/tasks.service.js';
 
 interface ListFilter {
   taskIds?: string[];
@@ -39,14 +38,35 @@ export async function updateStatus(
   status: string,
   currentUser?: { sub: string; role?: string },
 ) {
-  // Once a Member has logged time on the task they can no longer change its
-  // status. Leads, Admins and super-admin are unaffected.
-  if (currentUser?.role === 'Member') {
-    const row = await prisma.taskAssignment.findUnique({
-      where: { task_id_member_id: { task_id: taskId, member_id: memberId } },
-      select: { status: true },
-    });
-    if (status !== row?.status && (await hasLoggedTimeForMember(taskId, memberId))) {
+  // Status-change guards for this member's own board column. Both only fire on
+  // a real change, and share a single query since the database is remote.
+  const existing = await prisma.task.findUnique({
+    where: { id: taskId },
+    select: {
+      assignments: { where: { member_id: memberId }, select: { status: true } },
+      time_logs: { select: { member_id: true, hours_logged: true, billing_hours: true } },
+    },
+  });
+  const current = existing?.assignments[0]?.status;
+
+  if (existing && status !== current) {
+    const isLogged = (t: { hours_logged: unknown; billing_hours: unknown }) =>
+      Number(t.hours_logged) > 0 || Number(t.billing_hours) > 0;
+    // Scoped to this member's own logged time rather than the task's: on a
+    // multi-assignee task one person booking hours must not freeze everyone
+    // else's column. Hours are always credited to an assignee, so "they
+    // completed it and logged the time" is exactly this condition.
+    const loggedByMember = existing.time_logs.some((t) => t.member_id === memberId && isLogged(t));
+
+    // Completed + logged time: frozen for every role.
+    if (current === 'Complete' && loggedByMember) {
+      throw ApiError.forbidden(
+        'This task is Completed with logged time and can no longer be moved.',
+      );
+    }
+
+    // Members are additionally locked once they log time, at any status.
+    if (currentUser?.role === 'Member' && loggedByMember) {
       throw ApiError.forbidden('You cannot change the status after logging time for this task.');
     }
   }

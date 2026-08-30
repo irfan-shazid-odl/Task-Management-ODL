@@ -98,6 +98,10 @@ export interface Task {
   estimated_time?: number | null;
   total_logged_hours?: number;
   total_billing_hours?: number;
+  // Whether any time was ever booked against this task, independent of the
+  // board's current day/month window (total_logged_hours is scoped to it).
+  // Supplied by the board endpoint; drives the completed-task lock.
+  has_logged_time?: boolean;
   log_date?: string;
   created_at?: string;
   updated_at?: string;

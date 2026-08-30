@@ -7,28 +7,64 @@ import { api, subscribeToChanges } from '@/lib/api';
 import type { TaskListParams } from '@/lib/api/resources/tasks';
 import { toast } from 'sonner';
 import { useProjects } from '@/hooks/queries/useProjects';
+import { useAppDispatch, useAppSelector } from '@/store/hooks';
+import {
+  setViewMode as setViewModeAction,
+  setFilterMode as setFilterModeAction,
+  setDate as setDateAction,
+  setMonth as setMonthAction,
+  setProjectId as setProjectIdAction,
+  setShowTasksTable as setShowTasksTableAction,
+} from '@/store/slices/boardSlice';
 import { useBoardPDF } from './useBoardPDF';
 import { useBoardReports } from './useBoardReports';
 
 export type ViewMode = 'mine' | 'all' | string;
+
+// Rows from one api.tasks.board() call, handed to enrichTasks instead of the
+// three separate requests it used to issue itself.
+interface BoardSources {
+  timeLogs: any[];
+  documents: any[];
+  assignments: any[];
+}
 
 export function useBoardState() {
   const { currentUser, teamMembers } = useUser();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [showTasksTable, setShowTasksTable] = useState(true);
+
+  // Board view/filter state lives in Redux so it survives navigating away and
+  // back (the slice existed for this but was never wired up). Everything
+  // ephemeral — dropdown open flags, the calendar's browsing month, modal and
+  // new-task form fields — deliberately stays local: it is component-scoped,
+  // changes on every keystroke, and would only add store churn.
+  const dispatch = useAppDispatch();
+  const viewMode = useAppSelector(s => s.board.viewMode);
+  const boardFilterMode = useAppSelector(s => s.board.filterMode);
+  const boardDate = useAppSelector(s => s.board.date);
+  const boardMonth = useAppSelector(s => s.board.month);
+  const boardProjectId = useAppSelector(s => s.board.projectId);
+  const showTasksTable = useAppSelector(s => s.board.showTasksTable);
+
+  const setViewMode = useCallback((m: ViewMode) => { dispatch(setViewModeAction(m)); }, [dispatch]);
+  const setBoardFilterMode = useCallback((m: 'day' | 'month') => { dispatch(setFilterModeAction(m)); }, [dispatch]);
+  const setBoardDate = useCallback((d: string) => { dispatch(setDateAction(d)); }, [dispatch]);
+  const setBoardMonth = useCallback((m: string) => { dispatch(setMonthAction(m)); }, [dispatch]);
+  const setBoardProjectId = useCallback((id: string) => { dispatch(setProjectIdAction(id)); }, [dispatch]);
+  const setShowTasksTable = useCallback((v: boolean) => { dispatch(setShowTasksTableAction(v)); }, [dispatch]);
 
   useEffect(() => {
     const savedValue = localStorage.getItem('octopi_show_tasks_table');
     if (savedValue !== null) {
-      setShowTasksTable(savedValue === 'true');
+      dispatch(setShowTasksTableAction(savedValue === 'true'));
     }
-  }, []);
+  }, [dispatch]);
 
   const toggleTasksTable = () => {
     const newState = !showTasksTable;
-    setShowTasksTable(newState);
+    dispatch(setShowTasksTableAction(newState));
     localStorage.setItem('octopi_show_tasks_table', String(newState));
   };
 
@@ -37,12 +73,6 @@ export function useBoardState() {
   const [todaysTotalBillingHours, setTodaysTotalBillingHours] = useState(0);
   const [todaysTotalProjects, setTodaysTotalProjects] = useState(0);
 
-  const [viewMode, setViewMode] = useState<ViewMode>('mine');
-
-  const [boardFilterMode, setBoardFilterMode] = useState<'day' | 'month'>('day');
-  const [boardDate, setBoardDate] = useState(new Date().toLocaleDateString('en-CA'));
-  const [boardMonth, setBoardMonth] = useState(() => new Date().toLocaleDateString('en-CA').slice(0, 7));
-  const [boardProjectId, setBoardProjectId] = useState<string>('all');
   const [boardProjectDropdownOpen, setBoardProjectDropdownOpen] = useState(false);
   const [boardProjectSearch, setBoardProjectSearch] = useState('');
   const [boardCalendarOpen, setBoardCalendarOpen] = useState(false);
@@ -143,6 +173,7 @@ export function useBoardState() {
       t.updated_at,
       t.total_logged_hours,
       t.total_billing_hours,
+      t.has_logged_time,
       t.project?.name ?? null,
       t.project?.category ?? null,
       t.reference_doc?.id ?? null,
@@ -182,16 +213,20 @@ export function useBoardState() {
 
   const activitySigRef = useRef('');
 
-  const enrichTasks = useCallback(async (tasksData: any[]) => {
+  // Pure transform over rows already fetched by api.tasks.board(). All date
+  // bucketing below still runs in the browser's timezone exactly as before —
+  // only the network fetching moved out of this function.
+  const enrichTasks = useCallback((tasksData: any[], sources: BoardSources) => {
     if (!tasksData.length) return [];
-    const taskIds = tasksData.map(t => t.id);
-    const refDocIds = [...new Set(tasksData.map((t: any) => t.reference_doc_id).filter(Boolean))];
 
-    const [logsData, refDocs, rawAssignments] = await Promise.all([
-      api.timeLogs.list({ taskIds, include: 'task.project' }),
-      api.documents.listByIds(refDocIds as string[]),
-      api.taskAssignments.list({ taskIds }),
-    ]);
+    // The bundle is fetched for the pre-filter task set, but callers may drop
+    // tasks afterwards (the today/carry-over filter). Narrow the logs and
+    // assignments to the surviving tasks so the totals below stay identical to
+    // the old per-task-id requests.
+    const taskIdSet = new Set(tasksData.map(t => t.id));
+    const logsData = (sources.timeLogs || []).filter((l: any) => taskIdSet.has(l.task_id));
+    const rawAssignments = (sources.assignments || []).filter((a: any) => taskIdSet.has(a.task_id));
+    const refDocs = sources.documents;
 
     const memberIds = new Set((rawAssignments || []).map((a: any) => a.member_id).filter(Boolean));
     const memberMap = new Map<string, any>();
@@ -321,33 +356,25 @@ export function useBoardState() {
       }
 
       if (viewMode === 'all') {
-        const tasksData = await api.tasks.list(baseParams);
+        const bundle = await api.tasks.board(baseParams);
         if (fetchSeqRef.current !== fetchSeq) return;
-        const enriched = (tasksData.length ? await enrichTasks(tasksData) : []) as Task[];
+        const enriched = (bundle.tasks.length ? enrichTasks(bundle.tasks, bundle) : []) as Task[];
         startTransition(() => setTasks(stabilizeTasks(enriched)));
         setLoading(false); setRefreshing(false); return;
       }
 
+      // Member board. The server scopes tasks to this member's assignments and
+      // returns their statuses alongside, so the old assignments->tasks
+      // round-trip pair collapses into the same single request.
       const targetId = viewMode === 'mine' ? currentUser.id : viewMode;
-      const assignments = await api.taskAssignments.list({ memberId: targetId });
 
-      if (!assignments || assignments.length === 0) {
-        if (fetchSeqRef.current !== fetchSeq) return;
-        setTasks([]); setLoading(false); setRefreshing(false); return;
-      }
-
-      const taskIds = assignments.map((a: any) => a.task_id);
-      const assignmentStatusMap = new Map<string, TaskStatus>(
-        assignments.map((a: any) => [a.task_id, a.status as TaskStatus])
-      );
-
-      let memberParams: TaskListParams;
+      let memberParams: TaskListParams & { member_id?: string };
       if (boardFilterMode !== 'month') {
         memberParams = {
           include: 'project',
           order_by: 'created_at',
           order: 'desc',
-          ids: taskIds,
+          member_id: targetId,
         };
         if (isToday) {
           // Today's board carries unfinished work forward, so fetch
@@ -359,11 +386,15 @@ export function useBoardState() {
         }
         if (boardProjectId !== 'all') memberParams.project_id = boardProjectId;
       } else {
-        memberParams = { ...baseParams, ids: taskIds };
+        memberParams = { ...baseParams, member_id: targetId };
       }
 
-      const tasksData = await api.tasks.list(memberParams);
-      const tasksWithAssignmentStatus = (tasksData || []).map((t: any) => ({
+      const bundle = await api.tasks.board(memberParams);
+      const assignmentStatusMap = new Map<string, TaskStatus>(
+        (bundle.memberAssignments || []).map((a: any) => [a.task_id, a.status as TaskStatus])
+      );
+
+      const tasksWithAssignmentStatus = (bundle.tasks || []).map((t: any) => ({
         ...t,
         assignment_status: assignmentStatusMap.get(t.id) || null,
       }));
@@ -378,7 +409,7 @@ export function useBoardState() {
       }
 
       if (fetchSeqRef.current !== fetchSeq) return;
-      const enriched = (filteredTasks.length ? await enrichTasks(filteredTasks) : []) as Task[];
+      const enriched = (filteredTasks.length ? enrichTasks(filteredTasks, bundle) : []) as Task[];
       startTransition(() => setTasks(stabilizeTasks(enriched)));
     } catch {
       if (fetchSeqRef.current !== fetchSeq) return;

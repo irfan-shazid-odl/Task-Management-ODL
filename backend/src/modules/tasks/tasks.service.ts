@@ -93,6 +93,106 @@ export async function list(f: TaskListFilter) {
   return serialize(rows);
 }
 
+// Single round-trip payload for the board page.
+//
+// The board previously issued five requests across three sequential waves on
+// every 8s poll: task-assignments(member) -> tasks(ids) -> {time-logs,
+// documents, task-assignments(taskIds)}. This collapses that into one request.
+//
+// Deliberately does *selection* only, never interpretation: the caller passes
+// the very same date filters it already computed, and all bucketing/date
+// comparison stays on the client. Task.log_date is a bare @db.Date (UTC
+// midnight) and the board renders it through toLocaleDateString('en-CA') in the
+// *browser's* timezone — moving that math here would silently shift days for
+// any user whose timezone is behind UTC. So the client keeps it.
+export interface BoardBundleFilter extends TaskListFilter {
+  /** Absent = the "all members" central board; set = that member's board. */
+  memberId?: string;
+}
+
+const PROJECT_SELECT = { select: { id: true, name: true, category: true } } as const;
+
+export async function boardBundle(f: BoardBundleFilter) {
+  // One query. The database lives in us-east-1 while users are not, so a
+  // round trip costs far more than the rows do — the win here is eliminating
+  // sequential trips, not shrinking payloads. Every relation the board needs
+  // (project, assignees, time logs, reference doc) hangs off Task, so Prisma
+  // can resolve the whole graph in a single pipelined call instead of the
+  // five separate requests the client used to chain.
+  const where = buildWhere(f);
+
+  const rows = await prisma.task.findMany({
+    // Member board: scope to tasks this member is assigned to. Replaces the
+    // old "fetch their assignments, then re-query tasks by id" pair.
+    where: f.memberId
+      ? { AND: [where, { assignments: { some: { member_id: f.memberId } } }] }
+      : where,
+    orderBy: buildOrder(f),
+    include: {
+      project: PROJECT_SELECT,
+      assignments: true,
+      reference_doc: true,
+      time_logs: true,
+    },
+  });
+
+  // Flatten the graph back into the flat arrays the board already consumes, so
+  // no client-side interpretation changes.
+  const tasks: unknown[] = [];
+  const assignments: unknown[] = [];
+  const memberAssignments: unknown[] = [];
+  const timeLogs: unknown[] = [];
+  const documentsById = new Map<string, unknown>();
+
+  for (const row of rows) {
+    const { assignments: rowAssignments, time_logs, reference_doc, ...task } = row;
+
+    // Whether *any* time was ever booked against this task, independent of the
+    // board's current day/month window. The client's own total_logged_hours is
+    // scoped to that window, so it can read 0 for a task completed last month
+    // that does have logged time — not a safe basis for the completed-task
+    // lock. This flag is the authoritative one.
+    const hasLoggedTime = time_logs.some(
+      (l) => Number(l.hours_logged) > 0 || Number(l.billing_hours) > 0,
+    );
+
+    tasks.push({ ...task, has_logged_time: hasLoggedTime });
+
+    for (const a of rowAssignments) {
+      assignments.push(a);
+      if (f.memberId && a.member_id === f.memberId) memberAssignments.push(a);
+    }
+
+    // The board reads log.task.project.id when tallying which projects were
+    // touched, so re-attach the parent the nested shape dropped.
+    for (const log of time_logs) {
+      timeLogs.push({ ...log, task: { ...task, project: row.project } });
+    }
+
+    if (reference_doc) documentsById.set(reference_doc.id, reference_doc);
+  }
+
+  // Match the ordering the standalone endpoints returned.
+  assignments.sort(cmpAssignment);
+  memberAssignments.sort(cmpAssignment);
+  timeLogs.sort((a, b) => ((a as { id: string }).id < (b as { id: string }).id ? -1 : 1));
+
+  return {
+    tasks: serialize(tasks),
+    memberAssignments: serialize(memberAssignments),
+    assignments: serialize(assignments),
+    timeLogs: serialize(timeLogs),
+    documents: serialize([...documentsById.values()]),
+  };
+}
+
+function cmpAssignment(a: unknown, b: unknown) {
+  const x = a as { task_id: string; member_id: string };
+  const y = b as { task_id: string; member_id: string };
+  if (x.task_id !== y.task_id) return x.task_id < y.task_id ? -1 : 1;
+  return x.member_id < y.member_id ? -1 : x.member_id > y.member_id ? 1 : 0;
+}
+
 export interface TaskData {
   project_id?: string | null;
   description: string;
@@ -182,20 +282,47 @@ export async function updateTask(
   patch: Partial<TaskData>,
   currentUser?: { sub: string; role?: string },
 ) {
-  // Once a Member has logged time on a task they can no longer change its
-  // status (no-op status sends still pass). Leads, Admins and super-admin are
-  // unaffected.
-  if (currentUser?.role === 'Member' && patch.status !== undefined) {
+  // Status-change guards. Both only apply when the status actually changes, so
+  // no-op sends (and edits to other fields) still pass. One query serves both
+  // checks — the database is remote and round trips are the expensive part.
+  if (patch.status !== undefined) {
     const existing = await prisma.task.findUnique({
       where: { id },
       select: {
         status: true,
-        assignments: { where: { member_id: currentUser.sub }, select: { status: true } },
+        assignments: { select: { member_id: true, status: true } },
+        time_logs: { select: { member_id: true, hours_logged: true, billing_hours: true } },
       },
     });
-    const currentStatus = existing?.assignments[0]?.status ?? existing?.status;
-    if (patch.status !== currentStatus && (await hasLoggedTimeForMember(id, currentUser.sub))) {
-      throw ApiError.forbidden('You cannot change the status after logging time for this task.');
+
+    const mine = currentUser
+      ? existing?.assignments.find((a) => a.member_id === currentUser.sub)
+      : undefined;
+    const currentStatus = mine?.status ?? existing?.status;
+
+    if (existing && patch.status !== currentStatus) {
+      const logs = existing.time_logs;
+      const isLogged = (t: { hours_logged: unknown; billing_hours: unknown }) =>
+        Number(t.hours_logged) > 0 || Number(t.billing_hours) > 0;
+
+      // A completed task that has booked time is frozen for everyone, matching
+      // the same rule deleteTask() already enforces: once the hours are on the
+      // record, the status they were logged against must not shift underneath.
+      const isCompleted =
+        existing.status === 'Complete' || existing.assignments.some((a) => a.status === 'Complete');
+      if (isCompleted && logs.some(isLogged)) {
+        throw ApiError.forbidden(
+          'This task is Completed with logged time and can no longer be moved.',
+        );
+      }
+
+      // Members are additionally locked once they personally log time.
+      if (
+        currentUser?.role === 'Member' &&
+        logs.some((t) => t.member_id === currentUser.sub && isLogged(t))
+      ) {
+        throw ApiError.forbidden('You cannot change the status after logging time for this task.');
+      }
     }
   }
 

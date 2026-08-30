@@ -1,6 +1,6 @@
 import React from 'react';
 import Link from 'next/link';
-import { ChevronRight, ChevronLeft, Clock, CalendarDays, Loader2, Send, ExternalLink, Pencil, FileText, ChevronDown, Wallet, Trash2 } from 'lucide-react';
+import { ChevronRight, ChevronLeft, Clock, CalendarDays, Loader2, Send, ExternalLink, Pencil, FileText, ChevronDown, Wallet, Trash2, Lock } from 'lucide-react';
 import { Task, TASK_STATUSES } from '@/lib/types';
 import { PriorityBadge } from '../StatusBadge';
 import Avatar from '../Avatar';
@@ -17,7 +17,7 @@ interface TaskCardDetailsProps {
   logDateOnEditStartRef: React.MutableRefObject<string>; commitLogDateOnly: (date: string) => Promise<void>;
   isLongDesc: boolean; DESC_LIMIT: number; displayStatus: string; getTaskAge: (date: string) => string;
   deadlineDate: Date | null; isOverdue: boolean | null; showMoveButtons: boolean;
-  canDelete?: boolean; onRequestDelete?: () => void;
+  canDelete?: boolean; onRequestDelete?: () => void; isLockedComplete?: boolean;
 }
 
 export default function TaskCardDetails({
@@ -25,7 +25,7 @@ export default function TaskCardDetails({
   logDateEditable, setLogDateEditable, logDate, setLogDate, logging, logHours, hours, setHours, billingHours,
   setBillingHours, canMoveBackward, canMoveForward, moving, moveTask, currentIndex, openEdit, taskStoredLogDate,
   logDateOnEditStartRef, commitLogDateOnly, isLongDesc, DESC_LIMIT, displayStatus, getTaskAge, deadlineDate,
-  isOverdue, showMoveButtons, canDelete, onRequestDelete
+  isOverdue, showMoveButtons, canDelete, onRequestDelete, isLockedComplete
 }: TaskCardDetailsProps) {
   return (
     <>
@@ -33,8 +33,8 @@ export default function TaskCardDetails({
           className={`group relative bg-white border border-slate-200 rounded-xl p-4
           hover:border-violet-200 hover:bg-slate-50/50 transition-all duration-300
           shadow-sm hover:shadow-md hover:shadow-violet-500/5 cursor-pointer
-          active:cursor-grabbing`}
-          draggable
+          ${isLockedComplete ? '' : 'active:cursor-grabbing'}`}
+          draggable={!isLockedComplete}
           onDragStart={(e: any) => { e.dataTransfer.setData('taskId', task.id); }}
           onClick={() => openEdit()}
         >
@@ -269,8 +269,15 @@ export default function TaskCardDetails({
           Log Both Entries
         </button>
 
-        {/* Move Buttons */}
-        {showMoveButtons && (
+        {/* Move Buttons — replaced by a reason once the task is locked, so the
+            card explains itself instead of showing two dead arrows. */}
+        {showMoveButtons && isLockedComplete && (
+          <div className="flex items-center justify-center gap-1.5 pt-2 border-t border-slate-100 text-[10px] font-semibold text-slate-400">
+            <Lock className="w-3 h-3" />
+            Locked — completed with logged time
+          </div>
+        )}
+        {showMoveButtons && !isLockedComplete && (
           <div className="flex items-center justify-between pt-2 border-t border-slate-100">
             <button
               onClick={(e) => { e.stopPropagation(); moveTask('backward'); }}
