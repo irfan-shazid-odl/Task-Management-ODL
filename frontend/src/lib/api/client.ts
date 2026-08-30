@@ -1,8 +1,18 @@
 // Core API client: a thin typed wrapper over fetch that targets the Express
 // backend, attaches the JWT, and normalizes errors to `{ error }` messages.
 
-export const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') || 'http://localhost:4000/api';
+export const API_BASE_URL = (() => {
+  const raw = process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, '') || 'http://localhost:4000/api';
+  try {
+    const parsed = new URL(raw);
+    // The backend mounts everything under /api. Tolerate env values that point
+    // at the host root and normalize them to the /api base automatically.
+    if (parsed.pathname === '' || parsed.pathname === '/') return `${parsed.origin}/api`;
+  } catch {
+    // Keep whatever value was provided if it isn't a parseable URL.
+  }
+  return raw;
+})();
 
 // Write payloads from the UI frequently use `field || null` for optional
 // values. This mapped type mirrors an entity's fields but also permits null,
