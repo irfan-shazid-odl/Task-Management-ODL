@@ -289,8 +289,16 @@ export async function updateTask(
   // Status-change guards. Both only apply when the status actually changes, so
   // no-op sends (and edits to other fields) still pass. One query serves both
   // checks — the database is remote and round trips are the expensive part.
+  // Hoisted so the sole-assignee sync below (after the write) can reuse it
+  // instead of a second round trip.
+  let existing: {
+    status: string;
+    assignments: { member_id: string; status: string }[];
+    time_logs: { member_id: string | null; hours_logged: unknown; billing_hours: unknown }[];
+  } | null = null;
+
   if (patch.status !== undefined) {
-    const existing = await prisma.task.findUnique({
+    existing = await prisma.task.findUnique({
       where: { id },
       select: {
         status: true,
@@ -341,7 +349,34 @@ export async function updateTask(
     ...(patch.estimated_time !== undefined ? { estimated_time: patch.estimated_time } : {}),
     ...(patch.log_date !== undefined ? { log_date: patch.log_date ? new Date(patch.log_date) : undefined } : {}),
   };
-  const task = await prisma.task.update({ where: { id }, data });
+
+  // Single-assignee tasks: the one assignee's status and the task's "global"
+  // status are the same fact viewed from two places (their own board vs. the
+  // Central/All-Members board). Nothing else has a claim on what the status
+  // "really" is, so keep them identical — otherwise the central board can
+  // show e.g. Working on a card while that same task's sole assignee has it
+  // marked Complete on their own board. Multi-assignee tasks are left alone:
+  // which of several people's status should override the shared one is a
+  // real judgment call, not a bug, so that stays whatever the central board
+  // was explicitly set to (mirrored the other direction in taskAssignments
+  // .service.ts's updateStatus()).
+  const soleAssigneeId =
+    patch.status !== undefined && existing?.assignments.length === 1
+      ? existing.assignments[0].member_id
+      : null;
+
+  const task = soleAssigneeId
+    ? (
+        await prisma.$transaction([
+          prisma.task.update({ where: { id }, data }),
+          prisma.taskAssignment.updateMany({
+            where: { task_id: id, member_id: soleAssigneeId },
+            data: { status: patch.status },
+          }),
+        ])
+      )[0]
+    : await prisma.task.update({ where: { id }, data });
+
   return serialize(task);
 }
 

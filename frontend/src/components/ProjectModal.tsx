@@ -8,6 +8,11 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Project, Client, PROJECT_CATEGORIES, TASK_PRIORITIES } from '@/lib/types';
 import { useUser } from '@/components/UserContext';
 
+// Known types shown even if no project has used them yet. A lead typing a new
+// one below just becomes a new distinct value the next project can pick from
+// — no separate table to create a row in, unlike Client.
+const DEFAULT_PROJECT_TYPES = ['CRM', 'Website', 'Vibe'];
+
 const EMPTY_FORM: Partial<Project> = {
   name: '',
   client_id: '',
@@ -33,10 +38,16 @@ export default function ProjectModal({ isOpen, onClose, onSuccess, editingProjec
   const [form, setForm] = useState<Partial<Project>>(EMPTY_FORM);
   const [clients, setClients] = useState<Client[]>([]);
   const [newClientName, setNewClientName] = useState('');
+  // Project Type has no lookup table of its own — it's a free-text column on
+  // Project — so "existing types" means whatever distinct values other
+  // projects already used. DEFAULT_PROJECT_TYPES seeds the list so the
+  // dropdown isn't empty before any project has used a custom one.
+  const [projectTypes, setProjectTypes] = useState<string[]>(DEFAULT_PROJECT_TYPES);
+  const [newProjectType, setNewProjectType] = useState('');
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  // eslint-disable react-hooks/set-state-in-effect -- resetting form state when modal opens
+  /* eslint-disable react-hooks/set-state-in-effect -- resetting form state when modal opens */
   useEffect(() => {
     if (isOpen) {
       if (editingProject) {
@@ -55,6 +66,7 @@ export default function ProjectModal({ isOpen, onClose, onSuccess, editingProjec
         setForm(EMPTY_FORM);
       }
       setNewClientName('');
+      setNewProjectType('');
       setErrors({});
 
       // Fetch clients for dropdown
@@ -68,9 +80,24 @@ export default function ProjectModal({ isOpen, onClose, onSuccess, editingProjec
         }
       };
       fetchClients();
+
+      // Project Type isn't backed by its own table, so "existing types" is
+      // just the distinct values already in use, unioned with the defaults so
+      // a lead's earlier custom type stays offered to the next project too.
+      const fetchProjectTypes = async () => {
+        try {
+          const data = await api.projects.list();
+          const used = data.map(p => p.project_type).filter((t): t is string => !!t?.trim());
+          const merged = [...new Set([...DEFAULT_PROJECT_TYPES, ...used])].sort((a, b) => a.localeCompare(b));
+          setProjectTypes(merged);
+        } catch {
+          // On error, leave the default list in place.
+        }
+      };
+      fetchProjectTypes();
     }
   }, [isOpen, editingProject]);
-  // eslint-enable react-hooks/set-state-in-effect
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const handleSave = async () => {
     const newErrors: Record<string, string> = {};
@@ -90,6 +117,10 @@ export default function ProjectModal({ isOpen, onClose, onSuccess, editingProjec
         finalClientId = newClient.id;
       }
 
+      // Unlike Client, a custom Project Type has no row to create — it's a
+      // plain string column, so typing one just becomes the value directly.
+      const finalProjectType = newProjectType.trim() || form.project_type || null;
+
       const payload = {
         name: form.name!.trim(),
         client_id: finalClientId,
@@ -97,7 +128,7 @@ export default function ProjectModal({ isOpen, onClose, onSuccess, editingProjec
         project_lead_id: form.project_lead_id || null,
         status: form.status,
         priority: form.priority,
-        project_type: form.project_type || null,
+        project_type: finalProjectType,
         start_date: form.start_date || null,
         brief: form.brief || null,
       };
@@ -253,16 +284,26 @@ export default function ProjectModal({ isOpen, onClose, onSuccess, editingProjec
               <label className="text-sm font-semibold text-slate-800 tracking-tight">Project Type</label>
               <div className="relative">
                 <select
-                  value={form.project_type || ''} onChange={e => setForm({...form, project_type: e.target.value})}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 pr-10 text-slate-900 appearance-none focus:outline-none focus:ring-2 focus:ring-violet-500/10 focus:border-violet-500 transition-all font-medium"
+                  value={form.project_type || ''}
+                  onChange={e => { setForm({...form, project_type: e.target.value}); setNewProjectType(''); }}
+                  disabled={!!newProjectType}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 pr-10 text-slate-900 appearance-none focus:outline-none focus:ring-2 focus:ring-violet-500/10 focus:border-violet-500 transition-all font-medium disabled:opacity-50"
                 >
                   <option value="">Select a type...</option>
-                  <option value="CRM">CRM</option>
-                  <option value="Website">Website</option>
-                  <option value="Vibe">Vibe</option>
+                  {projectTypes.map(t => <option key={t} value={t}>{t}</option>)}
                 </select>
                 <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
               </div>
+              <input
+                type="text"
+                placeholder="Or create new type..."
+                value={newProjectType}
+                onChange={(e) => {
+                  setNewProjectType(e.target.value);
+                  if (e.target.value) setForm({ ...form, project_type: '' });
+                }}
+                className="w-full mt-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition-all"
+              />
             </div>
             <div className="space-y-1.5">
               <label className="text-sm font-semibold text-slate-800 tracking-tight">Status</label>

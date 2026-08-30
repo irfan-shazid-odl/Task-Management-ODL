@@ -40,14 +40,16 @@ export async function updateStatus(
 ) {
   // Status-change guards for this member's own board column. Both only fire on
   // a real change, and share a single query since the database is remote.
+  // Fetches every assignment (not just this member's) so the sole-assignee
+  // sync below can tell whether this member is the task's only assignee.
   const existing = await prisma.task.findUnique({
     where: { id: taskId },
     select: {
-      assignments: { where: { member_id: memberId }, select: { status: true } },
+      assignments: { select: { member_id: true, status: true } },
       time_logs: { select: { member_id: true, hours_logged: true, billing_hours: true } },
     },
   });
-  const current = existing?.assignments[0]?.status;
+  const current = existing?.assignments.find((a) => a.member_id === memberId)?.status;
 
   if (existing && status !== current) {
     const isLogged = (t: { hours_logged: unknown; billing_hours: unknown }) =>
@@ -71,10 +73,28 @@ export async function updateStatus(
     }
   }
 
-  await prisma.taskAssignment.updateMany({
-    where: { task_id: taskId, member_id: memberId },
-    data: { status },
-  });
+  // Single-assignee tasks: this member's status and the task's "global"
+  // status are the same fact — the Central/All-Members board reads
+  // Task.status directly and has no other assignee's status to reconcile
+  // against, so without this it can show a stale status while this member's
+  // own card already shows the real one. Multi-assignee tasks are left alone
+  // (mirrored the other direction in tasks.service.ts's updateTask()).
+  const isSoleAssignee = existing?.assignments.length === 1;
+
+  if (isSoleAssignee) {
+    await prisma.$transaction([
+      prisma.taskAssignment.updateMany({
+        where: { task_id: taskId, member_id: memberId },
+        data: { status },
+      }),
+      prisma.task.update({ where: { id: taskId }, data: { status } }),
+    ]);
+  } else {
+    await prisma.taskAssignment.updateMany({
+      where: { task_id: taskId, member_id: memberId },
+      data: { status },
+    });
+  }
   return { ok: true };
 }
 
