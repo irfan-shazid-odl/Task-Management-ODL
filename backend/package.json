@@ -14,6 +14,7 @@
     "prisma:deploy": "prisma migrate deploy --schema=prisma/schema",
     "prisma:studio": "prisma studio --schema=prisma/schema",
     "db:seed": "tsx prisma/seed.ts",
+    "db:clean": "tsx prisma/clean.ts",
     "lint": "eslint \"src/**/*.ts\"",
     "postinstall": "prisma generate --schema=prisma/schema"
   },
