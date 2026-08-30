@@ -118,6 +118,70 @@ export function useBoardState() {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
+  // Keep object identity of tasks that did not change between fetches so the
+  // memoized KanbanColumn/TaskCard/table rows skip re-rendering when the 8s
+  // poll returns the same data. Rendering is driven purely by the fields here,
+  // so reusing the previous object is behavior-identical.
+  // Declared above enrichTasks/fetchTasks (which both close over these) so
+  // neither reads them before they're initialized.
+  const tasksByIdRef = useRef<Map<string, { sig: string; task: Task }>>(new Map());
+  const lastTasksRef = useRef<Task[]>([]);
+  const taskSignature = (t: any): string =>
+    JSON.stringify([
+      t.id,
+      t.description,
+      t.status,
+      t.assignment_status,
+      t.priority,
+      t.deadline,
+      t.project_id,
+      t.reference_doc_id,
+      t.category,
+      t.estimated_time,
+      t.log_date,
+      t.created_at,
+      t.updated_at,
+      t.total_logged_hours,
+      t.total_billing_hours,
+      t.project?.name ?? null,
+      t.project?.category ?? null,
+      t.reference_doc?.id ?? null,
+      (t.assignees || []).map((a: any) => `${a.id}:${a.name}:${a.status ?? ''}:${a.assignment_status ?? ''}`).join(','),
+    ]);
+
+  const stabilizeTasks = useCallback((next: Task[]): Task[] => {
+    const prevMap = tasksByIdRef.current;
+    const fresh = new Map<string, { sig: string; task: Task }>();
+    const out = new Array<Task>(next.length);
+    for (let i = 0; i < next.length; i++) {
+      const t = next[i];
+      const sig = taskSignature(t);
+      const old = prevMap.get(t.id);
+      if (old && old.sig === sig) {
+        fresh.set(t.id, old);
+        out[i] = old.task;
+      } else {
+        fresh.set(t.id, { sig, task: t });
+        out[i] = t;
+      }
+    }
+    tasksByIdRef.current = fresh;
+
+    // If every task object is bit-for-bit the same in the same order, hand back
+    // the exact previous array so React bails out of the whole board render.
+    const last = lastTasksRef.current;
+    let same = last.length === out.length;
+    if (same) {
+      for (let i = 0; i < out.length; i++) {
+        if (last[i] !== out[i]) { same = false; break; }
+      }
+    }
+    lastTasksRef.current = same ? last : out;
+    return lastTasksRef.current;
+  }, []);
+
+  const activitySigRef = useRef('');
+
   const enrichTasks = useCallback(async (tasksData: any[]) => {
     if (!tasksData.length) return [];
     const taskIds = tasksData.map(t => t.id);
@@ -323,7 +387,7 @@ export function useBoardState() {
     if (fetchSeqRef.current !== fetchSeq) return;
     setLoading(false);
     setRefreshing(false);
-  }, [currentUser, viewMode, boardDate, boardMonth, boardFilterMode, boardProjectId, enrichTasks, setTasks, setLoading, setRefreshing]);
+  }, [currentUser, viewMode, boardDate, boardMonth, boardFilterMode, boardProjectId, enrichTasks, stabilizeTasks, setTasks, setLoading, setRefreshing]);
 
   useEffect(() => {
     setLoading(true);
@@ -386,70 +450,18 @@ export function useBoardState() {
     }
   }, []);
 
-  // Keep object identity of tasks that did not change between fetches so the
-  // memoized KanbanColumn/TaskCard/table rows skip re-rendering when the 8s
-  // poll returns the same data. Rendering is driven purely by the fields here,
-  // so reusing the previous object is behavior-identical.
-  const tasksByIdRef = useRef<Map<string, { sig: string; task: Task }>>(new Map());
-  const lastTasksRef = useRef<Task[]>([]);
-  const taskSignature = (t: any): string =>
-    JSON.stringify([
-      t.id,
-      t.description,
-      t.status,
-      t.assignment_status,
-      t.priority,
-      t.deadline,
-      t.project_id,
-      t.reference_doc_id,
-      t.category,
-      t.estimated_time,
-      t.log_date,
-      t.created_at,
-      t.updated_at,
-      t.total_logged_hours,
-      t.total_billing_hours,
-      t.project?.name ?? null,
-      t.project?.category ?? null,
-      t.reference_doc?.id ?? null,
-      (t.assignees || []).map((a: any) => `${a.id}:${a.name}:${a.status ?? ''}:${a.assignment_status ?? ''}`).join(','),
-    ]);
-
-  const stabilizeTasks = useCallback((next: Task[]): Task[] => {
-    const prevMap = tasksByIdRef.current;
-    const fresh = new Map<string, { sig: string; task: Task }>();
-    const out = new Array<Task>(next.length);
-    for (let i = 0; i < next.length; i++) {
-      const t = next[i];
-      const sig = taskSignature(t);
-      const old = prevMap.get(t.id);
-      if (old && old.sig === sig) {
-        fresh.set(t.id, old);
-        out[i] = old.task;
-      } else {
-        fresh.set(t.id, { sig, task: t });
-        out[i] = t;
-      }
-    }
-    tasksByIdRef.current = fresh;
-
-    // If every task object is bit-for-bit the same in the same order, hand back
-    // the exact previous array so React bails out of the whole board render.
-    const last = lastTasksRef.current;
-    let same = last.length === out.length;
-    if (same) {
-      for (let i = 0; i < out.length; i++) {
-        if (last[i] !== out[i]) { same = false; break; }
-      }
-    }
-    lastTasksRef.current = same ? last : out;
-    return lastTasksRef.current;
-  }, []);
-
-  const activitySigRef = useRef('');
-
+  // Keep a ref pointed at the latest fetchTasks so stableFetchTasks/handleDeleteTask
+  // never go stale, without giving memoized children (KanbanColumn/TaskCard) a new
+  // callback identity every time a filter change (or an unrelated teamMembers
+  // context refresh flowing through enrichTasks) changes fetchTasks's own
+  // identity — that identity churn would otherwise defeat their memo checks.
+  // The "latest ref" idiom is intentionally exempted from the newer
+  // compiler-lint immutability/refs rules below; there's no stable-callback
+  // primitive in React yet (useEffectEvent is still experimental) that covers this.
+  /* eslint-disable react-hooks/immutability -- latest-ref idiom, see comment above */
   const fetchTasksRef = useRef(fetchTasks);
   useEffect(() => { fetchTasksRef.current = fetchTasks; }, [fetchTasks]);
+  /* eslint-enable react-hooks/immutability */
   const stableFetchTasks = useCallback(() => { fetchTasksRef.current(); }, []);
 
   const handleDropTask = useCallback(async (taskId: string, newStatus: TaskStatus) => {
@@ -477,7 +489,7 @@ export function useBoardState() {
         }
       }
     }
-  }, [tasks, currentUser, viewMode, getDisplayStatus, boardDate]);
+  }, [currentUser, viewMode, boardDate]);
 
   const handleDropTaskRef = useRef(handleDropTask);
   useEffect(() => { handleDropTaskRef.current = handleDropTask; }, [handleDropTask]);

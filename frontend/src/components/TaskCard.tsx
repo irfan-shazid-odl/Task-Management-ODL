@@ -96,7 +96,7 @@ const TaskCardComponent = ({ task, onStatusChange, onHoursLogged, onDropTask, on
   const docDropdownRef = useRef<HTMLDivElement>(null);
 
   // Fetch documents when project changes
-  // eslint-disable react-hooks/set-state-in-effect -- resetting derived data on prop change
+  /* eslint-disable react-hooks/set-state-in-effect -- resetting derived data on prop change */
   useEffect(() => {
     if (!editProjectId) {
       setEditProjectDocs([]);
@@ -121,7 +121,7 @@ const TaskCardComponent = ({ task, onStatusChange, onHoursLogged, onDropTask, on
       });
     return () => { cancelled = true; };
   }, [editProjectId]);
-  // eslint-enable react-hooks/set-state-in-effect
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // Click outside handlers
   useEffect(() => {

@@ -146,8 +146,16 @@ export async function createTask(input: {
     const task = await tx.task.create({ data: toTaskCreate(input.task) });
 
     if (input.assigneeIds && input.assigneeIds.length) {
+      // Per-assignment status defaults to 'Todo' in the schema, so a task
+      // created with an initial status of e.g. 'Working' would still show up
+      // on each assignee's board under Todo unless we carry that status over
+      // here explicitly.
       await tx.taskAssignment.createMany({
-        data: input.assigneeIds.map((member_id) => ({ task_id: task.id, member_id })),
+        data: input.assigneeIds.map((member_id) => ({
+          task_id: task.id,
+          member_id,
+          status: input.task.status || 'Todo',
+        })),
         skipDuplicates: true,
       });
     }

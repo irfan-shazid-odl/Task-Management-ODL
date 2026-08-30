@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { memo } from 'react';
 import {
   KanbanSquare, RefreshCw, Plus, Clock,
   ChevronDown, ChevronRight, Download, FileText,
