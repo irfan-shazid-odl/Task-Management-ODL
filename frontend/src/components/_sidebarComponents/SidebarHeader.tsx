@@ -36,7 +36,7 @@ export default function SidebarHeader({ onClose }: SidebarHeaderProps) {
                   <span className="relative inline-flex w-1.5 h-1.5 rounded-full bg-emerald-500" />
                 </span>
                 <span className="text-[9px] text-emerald-700 font-bold tracking-wider uppercase">Live</span>
-                <span className="text-[9px] text-slate-400 dark:text-slate-500 font-semibold tracking-widest uppercase">v1.5.0</span>
+                <span className="text-[9px] text-slate-400 dark:text-slate-500 font-semibold tracking-widest uppercase">V2.0</span>
               </div>
             </div>
           </div>
